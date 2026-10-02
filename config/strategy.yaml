@@ -1,0 +1,3 @@
+symbol: SPY
+fast_window: 20
+slow_window: 60
