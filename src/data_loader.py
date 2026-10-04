@@ -1,27 +1,17 @@
-"""Read frozen local Parquet only. Network access lives in the download script."""
+"""V1 compatibility API. The only reading implementation lives in data.loader."""
 from pathlib import Path
-import hashlib
-import pandas as pd
-from src.validation import validate_market_data
+import json
+from src.data.manifest import file_sha256
+from src.data.loader import load_bars
 
 
-def file_sha256(path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open('rb') as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b''):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def load_market_data(path, start_date, end_date) -> pd.DataFrame:
+def load_market_data(path, start_date, end_date):
     path = Path(path)
-    if not path.is_file():
-        raise FileNotFoundError(f'Frozen dataset missing: {path}. Run scripts/download_data.py separately.')
-    data = pd.read_parquet(path)
-    validate_market_data(data)
-    start, end = pd.Timestamp(start_date), pd.Timestamp(end_date)
-    if start > end:
-        raise ValueError('start_date must not exceed end_date')
-    selected = data.loc[data.date.between(start, end)].reset_index(drop=True)
-    validate_market_data(selected)
-    return selected
+    sidecar = path.with_suffix('.metadata.json')
+    symbol = json.loads(sidecar.read_text())['symbol'] if sidecar.exists() else '_legacy_'
+    data = load_bars('US', [symbol], start_date, end_date, price_basis='legacy_provider_adjusted',
+                     legacy_path=path, require_legacy_metadata=False)
+    result = data.drop(columns='symbol')
+    result['date'] = result.date.astype(data.attrs['_legacy_date_dtype'])
+    result.attrs.clear()
+    return result

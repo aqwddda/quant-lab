@@ -84,8 +84,13 @@ def _simulate(data, indicators, initial_cash, costs, symbol, benchmark=False):
 
 def run_backtest(data, fast_window: int, slow_window: int, initial_cash: float,
                  costs: Costs, symbol: str = 'SPY') -> BacktestResult:
-    if symbol != 'SPY':
-        raise ValueError('This phase supports SPY only')
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise ValueError('A nonempty symbol is required')
+    if 'symbol' in data:
+        if data.symbol.nunique(dropna=False) != 1:
+            raise ValueError('Current backtest engine supports one symbol; Data Layer supports multi-symbol datasets.')
+        if not data.symbol.eq(symbol).all():
+            raise ValueError('Backtest symbol does not match bars')
     validate_market_data(data)
     data = data.reset_index(drop=True)
     indicators = calculate_signals(data, fast_window, slow_window)

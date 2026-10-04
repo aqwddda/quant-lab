@@ -1,3 +1,5 @@
 symbol: SPY
+market: US
+price_basis: legacy_provider_adjusted
 fast_window: 20
 slow_window: 60

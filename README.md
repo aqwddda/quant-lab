@@ -1,90 +1,153 @@
-# Quant Lab：最小可审计回测基础工程
+# Quant Lab：可审计的日线研究基础工程
 
-仅用于 SPY 日线研究：20/60 简单均线、long/cash、无融资或做空。
-遵循 `AGENTS.md`、`docs/基础工程.md` 和当前阶段的策略规范。
+当前数据层支持 US/CN 多标的数据管理；交易引擎仍是单资产日线 SMA20/SMA60、long/cash、T 收盘信号、T+1 开盘成交。执行和记账不建模完整 A 股规则；A 股回测仅用于数据链路 smoke test。
 
-熟悉 Python 但刚接触量化研究的读者，可先阅读 [项目教程](docs/项目教程.md)：从交易概念、时间线和人工记账案例到代码模块、绩效指标与调试。
+熟悉 Python 但刚接触量化研究的读者，可阅读 [项目教程](docs/项目教程.md)。该教程讲解 V1 SPY 实验；V2 数据架构以本文和 [实施方案](docs/Quant%20Lab%20Data%20Layer%20V2%20Implementation%20Plan.md) 为准。
 
-## 使用现有环境
+## 环境与默认实验
 
 ```bash
 conda activate quant-lab
 python --version  # Python 3.11
 python -m pip install -r requirements-lock.txt
 python -m pytest -q
-python scripts/download_data.py
 python scripts/run_backtest.py
 ```
 
-`requirements.txt` 列出直接依赖的兼容范围；`requirements-lock.txt` 固定本次验证环境的完整版本。
-不要创建新的环境。冻结数据已存在时跳过下载命令；下载脚本拒绝覆盖已有文件。
-两个脚本可以从任意工作目录执行，默认配置与数据路径相对项目根目录解析。
+使用已有 Conda 环境。`requirements.txt` 是直接依赖范围；lock 文件记录实际安装版本及项目依赖闭包，未加入 notebook 等无关环境包。
 
-## 模块与时间线
+默认配置继续使用原来的 `data/raw/spy_daily.parquet` 和 `.metadata.json`，价格口径为 `legacy_provider_adjusted`。文件 SHA-256 必须为 `bdd34d3bc950d433a5eeeaa594be558dd1c920dacbd61f8750366d8836bca19f`；预期 2766 行、45 次策略成交、1 次 benchmark 成交。该冻结文件不分发到 Git，当前重新下载的数据不能代替它复现历史实验。
 
-| 文件 | 职责 |
+所有脚本均可从其他工作目录运行，默认配置路径相对项目根目录。下载与回测严格分离。
+
+## Data Architecture
+
+```text
+Yahoo / Tushare Provider
+  → Immutable Source Snapshot
+  → Explicit Normalization
+  → Canonical Schema / Validation
+  → Frozen Store + Checksummed Manifest
+  → Local Loader
+  → Strategy / Backtest
+```
+
+| 路径 | 职责 |
 | --- | --- |
-| `src/data_loader.py` | 读取冻结 Parquet、计算 SHA-256，不联网 |
-| `src/strategy.py` | 只计算历史收盘均线及目标仓位 |
-| `src/execution.py` | 前一日目标在当日开盘执行、整数股、手续费与滑点 |
-| `src/portfolio.py` | 现金、持仓、成本基础、已实现/未实现损益、净值 |
-| `src/backtest.py` | 按交易日推进策略与 Benchmark |
-| `src/metrics.py` | 已完成回测的绩效指标 |
-| `src/validation.py` | 数据检查、未来变异及截断历史检查 |
+| `src/data/providers/` | 外部供应商通信、Yahoo exchange timezone 转换；可选能力不支持时明确报错 |
+| `src/data/normalize.py` | 字段映射、明确单位转换、供应商倒序数据的显式排序 |
+| `src/data/adjustment.py` | 从 raw OHLC 和 exact-date factor 构造研究价格，不补缺失因子 |
+| `src/data/validation.py` | schema、数据质量、市场 weekday/calendar 检查 |
+| `src/data/store.py` | 本地保存、定位、加载、SHA；不联网 |
+| `src/data/manifest.py` | provenance、版本、JSON manifest 和自身校验 |
+| `src/data/loader.py` | 校验完整冻结数据后筛选日期/标的，返回 long format |
+| `src/data_loader.py` | V1 compatibility wrapper，共用新 Loader 的读取实现 |
+| `src/strategy.py` | 仅计算历史收盘均线和仓位目标 |
+| `src/execution.py` / `src/portfolio.py` | 成交时序/成本与现金/持仓/损益 |
+| `src/backtest.py` / `src/metrics.py` | 按日驱动单资产账户与完成后的绩效计算 |
+| `src/validation.py` | Future Mutation Test 与策略因果性检查 |
 
-第 60 个交易日收盘才有完整 slow_ma；第 61 个交易日开盘才可能首次成交。
-策略目标 `target=-1` 表示未完成预热，`1` 表示持有，`0` 表示现金。
-`signal` 是当日收盘根据当前持仓产生的 BUY/SELL/HOLD/WAIT；最后一日新信号不成交。
-同日开盘成交不使用当天 high/low/close。当天 close 只用于收盘估值及次日目标。
-Benchmark 在第 61 个交易日开盘买入一次，与策略首次实际买入信号是否出现无关。
+```text
+data/source/{provider}/{dataset_id}/
+data/normalized/bars/{market}/1d/{symbol}/{dataset_id}/
+data/normalized/adjustments/{market}/{symbol}/{dataset_id}/
+data/normalized/corporate_actions/{market}/{symbol}/{dataset_id}/
+data/reference/instruments/{market}/{symbol}/{dataset_id}/
+data/reference/calendars/{market}/{symbol}/{dataset_id}/
+data/manifests/{dataset_id}.json
+```
 
-## 数据与配置
+版本目录支持重复请求的新快照；相同 dataset ID 拒绝覆盖。不同版本不会自动互相替换。Loader 找到多个匹配版本时必须指定 ID。Manifest 包含请求/实际区间、供应商版本、行数、单位/复权假设、source/normalized 文件 SHA-256；manifest 旁边的 `.json.sha256` 校验 manifest 本身。Manifest 最后发布；normalization 失败的 source 留作审计，没有 manifest 就不能进入研究读取。
 
-`config/strategy.yaml` 设置标的和均线窗口；`config/backtest.yaml` 设置资金、成本、日期、路径及年化因子。
-默认资金 100,000 USD、手续费 0.05%、单边滑点 0.02%，无风险年利率 0。
+Canonical bars 是 `date, symbol, open, high, low, close, volume`，可有 `amount`。`date` 为 `datetime64[ns]`、无时区、午夜的交易所本地 session 标签，**不是 UTC 时间戳**。存储和返回按 `date, symbol` 升序，键唯一；价格必须有限且正，OHLC 关系合法，成交量非负整数。Loader/Validator 不排序修复、不去重、不补值。
 
-下载使用 Yahoo Finance/yfinance 的复权 OHLC，结束日期包含 2025-12-31。
-数据文件为 `data/raw/spy_daily.parquet`，旁边的 `.metadata.json` 保存来源、复权设置、时间、日期范围与文件哈希。
-每日日期是纽约交易所当地会话日期，移除时区前先转到 America/New_York，不把它当成 UTC 成交时间。
-回测验证哈希，执行前后检查冻结文件一致，不重新下载、不排序修复、不补齐缺失值。
-检查日期唯一/升序/非空、时区、周末、数值有限、正价格、OHLC 关系及非负整数成交量。
-不独立验证交易所全部节假日，亦不能保证供应商未漏掉某个交易日。
+## Price Semantics
 
-## 账户与成本
+Source Data 是供应商返回快照，和 Raw Price 是两个概念。
 
-买入：`execution_price = raw_open * (1 + slippage_rate)`。
-卖出：`execution_price = raw_open * (1 - slippage_rate)`。
-`trade_value = quantity * execution_price`，`commission = trade_value * commission_rate`。
-`slippage_cost = quantity * abs(execution_price - raw_open)`，只作成本归因。
-滑点已包含在成交金额中，不再次扣现金。
+| price_basis | 产生方式 |
+| --- | --- |
+| `raw` | Tushare `daily` 未复权 OHLC；Yahoo `auto_adjust=False` 的 source OHLC仍有拆股调整，因此用冻结的全部后续拆股记录显式反向还原历史价格坐标 |
+| `provider_adjusted` | Yahoo `Adj Close / reconstructed raw Close` 得到 `provider_adjusted_close_ratio`，同时乘到 raw OHLC；保留供应商复权坐标 |
+| `qfq` | cumulative factor：`raw × factor / 截至请求结束日的最新 factor`，各 symbol 独立锚定；保留停牌日因子，不使用结束日之后的 factor |
+| `hfq` | `raw × cumulative factor`，保留供应商因子绝对尺度，与 Tushare SDK 一致，不按所选起始日重新缩放 |
+| `legacy_provider_adjusted` | 直接读取原 V1 `auto_adjust=True` 冻结 OHLC，避免重新生成历史价格或改变实验定义 |
 
-买入数量按 `floor(cash / (execution_price * (1 + commission_rate)))` 计算；买入扣成交金额和手续费，卖出增加成交金额减手续费。
-成本基础包含买入手续费；已实现损益包含两侧手续费与成交价滑点。
-现金不足一股时不产生虚构交易，也不允许负现金。
+`qfq/hfq` 需要 cumulative factor；Yahoo ratio 与 Tushare factor 不可混用。不支持或缺失的价格口径明确失败。OHLC 复权不改变 `volume/amount`。
 
-## 输出与指标口径
+Yahoo normalization 会显式反向还原供应商经过拆股缩放的 volume 和 dividend 金额；还原后无法得到整数成交量则报错。Tushare `vol` 从手乘 100 转为股，`amount` 从千元乘 1000 转为 CNY。仅容忍单位转换中的浮点舍入噪声，不接受真实分数股。
 
-生成 `reports/trades.csv`、`equity.csv`、`metrics.json`、`equity_curve.png`、`drawdown.png`。
-额外输出 `benchmark_trades.csv` 与 `benchmark_equity.csv`，便于独立复算基准。
-`metrics.json` 包含配置、数据来源和哈希、源码哈希、运行依赖版本及未来变异检查日期。
-数据、报告、缓存和秘密文件均被 Git 忽略；本项目不自动提交 Git。
+这些是下载时点的供应商快照；后来的公司行动、数据修订、qfq 锚点变化都会影响历史研究价格。Future Mutation Test 验证程序对已冻结输入的因果性，不能证明供应商数据或复权历史在原历史时点已经可得。
 
-- 总收益：期末净值 / 初始资金 - 1；CAGR 按首末日期间隔 / 365.25 计算，含现金预热期。
-- 波动率：日收益样本标准差 × √252；Sharpe：日超额收益均值 / 日收益样本标准差 × √252。
-- Sortino：日超额收益均值 / 全部日样本负超额收益的 RMS × √252。
-- 回撤从初始资金开始维护历史最高净值；Maximum Drawdown 输出负数；Calmar=CAGR/回撤绝对值。
-- Trade Count 是成交笔数；Closed Trade Count 是完整买卖往返次数。
-- 胜率、Profit Factor、平均盈利/亏损及持有期只统计已平仓往返；持有期单位为日历天。
-- Turnover 是累计双边成交金额 / 平均每日净值，不年化。
-- 没有已平仓交易或分母为零的比率输出 JSON `null`，不输出 NaN/Infinity。
+公式与口径参考：[yfinance auto_adjust 源码](https://github.com/ranaroussi/yfinance/blob/main/yfinance/utils.py)、[Yahoo 拆股价格口径](https://github.com/ranaroussi/yfinance/issues/687)、[Tushare daily 单位](https://tushare.pro/document/2?doc_id=27)、[Tushare pro_bar 复权](https://tushare.pro/document/2?doc_id=109)。实现的 SDK 数值对照使用本项目锁定版本的实际源码。
 
-## 已知假设和边界
+## Yahoo Example
 
-复权价格回测是合成价格账户，不是历史真实美元成交账本。
-分红/拆股影响已进入复权价格，不重复增加分红现金；复权后价格上的整数股也不是严格的历史真实股数。
-下载时的复权历史可能受后来公司行动及供应商修订影响，因此只对本次冻结数据复现结果。
-future mutation test 验证程序因果性，不能证明供应商数据本身是历史时点可得的数据。
+```bash
+python scripts/download_data.py --provider yahoo --market US --symbol SPY --start 2015-01-01 --end 2025-12-31 --frequency 1d
+python scripts/download_data.py --provider yahoo --market US --symbol AAPL --start 2015-01-01 --end 2025-12-31 --frequency 1d
+```
 
-固定滑点、按比例手续费、全额开盘成交是假设；没有成交量限制、冲击模型、现金利息、税费或最低手续费。
-回测期末不强制平仓，剩余持仓按复权收盘估值，不扣除假设清仓成本。
-在基础正确性确认前，不增加参数优化、Walk-Forward、实盘、模拟盘或其他策略。
+Yahoo 使用 `auto_adjust=False, repair=False, actions=True`，结束日期包含在请求范围。返回 timestamp 先转 exchange timezone 再移除时区。为反向还原拆股价格另取完整历史动作快照，其中可以有请求结束日之后的动作；这些用于显式 normalization，不交给 strategy。
+
+CLI 输出 dataset ID、请求/实际区间、source/normalized/manifest 路径和 SHA。下载新 SPY 数据不改变默认 V1 实验。
+
+## Tushare Example
+
+```bash
+export TUSHARE_TOKEN='your-token'
+python scripts/download_data.py --provider tushare --market CN --symbol 000001.SZ --start 2015-01-01 --end 2025-12-31 --frequency 1d
+python scripts/download_data.py --provider tushare --market CN --symbol 600519.SH --start 2015-01-01 --end 2025-12-31 --frequency 1d
+```
+
+Token 只从环境变量读取，不写 YAML、不使用 `set_token` 保存到本地。`.env.example` 仅给出变量名，程序不自动解析 `.env`。缺 token 明确失败；真实 API 还受账户积分和权限约束。响应触及 6000 行限制时拒绝当作完整数据，需缩短请求区间。
+
+## Dataset Verification / Loader
+
+```bash
+python scripts/verify_dataset.py --dataset-id <download-output-id>
+python scripts/inspect_data.py --dataset-id <download-output-id> --price-basis raw
+python scripts/verify_dataset.py --legacy-path data/raw/spy_daily.parquet
+```
+
+两种检查都只读取本地。也可用 `--manifest path/to/manifest.json`；`--root` 与 `--data-config` 支持独立数据存储目录。校验失败时 `verify_dataset.py` 输出 FAIL 并以非零状态退出。
+
+```python
+from src.data.loader import load_bars
+
+bars = load_bars(market='US', symbols=['SPY', 'AAPL'],
+                 start='2020-01-01', end='2025-12-31', price_basis='raw')
+# 返回 date × symbol long format，键唯一、升序。
+# 多个版本时可用 dataset_id='...'，或逐标的映射：
+# dataset_id={'SPY': 'spy-version-id', 'AAPL': 'aapl-version-id'}
+```
+
+`config/data.yaml` 管数据位置、供应商启用状态和日线默认值。`config/strategy.yaml` 设置 `symbol, market, price_basis, fast_window, slow_window`；`config/backtest.yaml` 设置资金、成本、日期、报告和指标口径，不直接指向 Parquet。
+
+新实验可复制 strategy/backtest YAML，设置 AAPL/US 与 `raw` 或 `provider_adjusted`，并给出独立 reports_dir：
+
+```bash
+python scripts/run_backtest.py --strategy-config path/to/strategy.yaml --backtest-config path/to/backtest.yaml --dataset-id <id>
+```
+
+交易引擎只接收一个 symbol；多标的读取不意味着多资产 Portfolio 已实现。默认资金 100,000、手续费 0.05%、单边滑点 0.02%，无风险年利率 0。
+
+## 账户、时间与输出
+
+T 收盘才知道目标仓位，T+1 开盘执行。60 日预热意味着第 61 个交易日才可能成交；末日的新信号不成交。Benchmark 在预热后首个可执行开盘尝试买入一次。
+
+买入 `execution_price = raw_open × (1 + slippage_rate)`，卖出为减号。`trade_value = quantity × execution_price`，`commission = trade_value × commission_rate`，`slippage_cost` 只作归因，已经进入成交价，不再扣一次现金。`raw_open` 在历史 V1 实验里表示所选复权坐标的滑点前开盘价，不能解释成历史真实美元价格。
+
+按可用现金与含手续费单股成本向下取整买入。成本基础包含买入手续费；已实现损益包含两侧手续费与滑点。不借款、不允许负现金，期末不强制平仓。
+
+每次输出 `trades.csv, equity.csv, metrics.json, equity_curve.png, drawdown.png`，另有 benchmark 独立交易/净值 CSV。audit 记录配置、market/provider/price_basis/dataset_id、manifest、SHA、源码哈希、环境版本及 Future Mutation Test cutoff。标题、标的、均线窗口、货币、session 文案均由实验决定。数据、报告、缓存和凭据不进入 Git。
+
+总收益为期末净值/初始资金−1；CAGR 用日历年；波动率/Sharpe 用配置的 sessions/year。回撤从初始资金高水位计算。成交笔数与已平仓往返次数分开，胜率等仅统计已平仓往返。Sortino 的负超额收益 RMS 以全部日样本作分母；Turnover 为双边成交金额/平均每日净值，不年化。无定义比率输出 JSON null。
+
+## Known Limitations
+
+Yahoo 仍可能有缺漏、错误拆股/分红或历史修订；反向拆股还原依赖供应商动作记录的完整性。US 只有 weekday 最低检查，未独立验证全部节假日或缺失 session。CN 用供应商交易日历检验已有 bars 的合法 open 日期，不把停牌当成数据补齐。
+
+Tushare 的 corporate action event normalization 暂不支持，明确抛 NotImplementedError；Yahoo 保存 dividend/split 事件。账户尚不处理分红现金或拆股持仓变更：复权模式是 synthetic adjusted-price account，raw 模式是无 corporate action accounting 的研究 smoke test。
+
+尚未建模 A 股 T+1、涨跌停、停牌撮合、整手约束和完整税费；CN 报告明确附带此限制。没有多资产组合、实盘、机器学习、参数优化或 Paper Trading。完成 V2 后应先人工 review，再决定下一阶段。

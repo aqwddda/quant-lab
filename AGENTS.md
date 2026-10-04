@@ -116,11 +116,24 @@ If such operations are required for evaluation labels, they must be isolated fro
 
 ## Data
 
-Raw downloaded market data must be stored under:
+The data flow is:
 
-data/raw/
+Data Provider → Source Snapshot → Normalization → Validation → Frozen Store → Loader → Backtest.
 
-Once downloaded for an experiment, backtests should read the frozen local dataset instead of downloading it again.
+Supplier responses are frozen under data/source/; canonical bars, adjustments and
+corporate actions live under data/normalized/; instruments and calendars under
+data/reference/; checksummed manifests under data/manifests/.
+data/raw/ preserves the historical V1 adjusted SPY experiment without rewriting it.
+
+Source Data means the supplier snapshot, not unadjusted historical prices.
+Raw Price means historical unadjusted OHLC. Adjustment semantics and units must be
+explicit. Yahoo's split-adjusted source OHLC requires an explicit, audited inverse
+split normalization before it is called raw.
+
+Providers must never enter Strategy. Backtests and local loaders never access the
+internet or download missing files. Downloading is a separate explicit action.
+Every frozen version must have provenance, content hashes and a unique dataset ID.
+Never silently choose between overlapping dataset versions.
 
 Use Parquet where practical.
 
@@ -232,14 +245,12 @@ Keep generated data, reports, credentials and secrets out of Git.
 
 ## Current phase
 
-The current phase is only:
-
-SPY
-daily bars
-20-day / 60-day moving average
-long or cash
-T close signal
-T+1 open execution
+The current Data Layer supports US/CN daily data and multi-symbol local reads.
+The Backtest Engine remains single asset, long or cash, with 20-day / 60-day moving
+averages, T close signals and T+1 open execution. The default SPY experiment uses
+legacy_provider_adjusted prices and must retain its recorded V1 regression results.
+CN backtests are data pipeline smoke tests and must disclose missing A-share
+execution rules. Corporate action events are stored but not applied to accounts.
 
 Do NOT implement:
 

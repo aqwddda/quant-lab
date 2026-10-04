@@ -1,4 +1,6 @@
+# Actual installed Python 3.11 project dependencies and their runtime closure.
 beautifulsoup4==4.15.0
+bs4==0.0.2
 certifi==2026.7.22
 cffi==2.1.1
 charset-normalizer==3.5.2
@@ -29,9 +31,13 @@ python-dateutil==2.9.0.post0
 pytz==2026.4
 PyYAML==6.0.3
 requests==2.34.2
+simplejson==4.2.0
 six==1.17.0
 soupsieve==2.10
+tqdm==4.70.1
+tushare==1.4.29
 typing_extensions==4.16.0
 urllib3==2.8.0
+websocket-client==1.9.2
 websockets==17.1
 yfinance==1.7.0

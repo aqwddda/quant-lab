@@ -2,36 +2,7 @@
 import numpy as np
 import pandas as pd
 from src.strategy import calculate_signals
-
-
-def validate_market_data(data: pd.DataFrame):
-    required = ['date', 'open', 'high', 'low', 'close', 'volume']
-    if data.empty or not set(required).issubset(data.columns):
-        raise ValueError('Nonempty date/OHLCV data required')
-    dates = data['date']
-    if not pd.api.types.is_datetime64_any_dtype(dates):
-        raise ValueError('date must be datetime64 exchange session dates')
-    if dates.dt.tz is not None:
-        raise ValueError('Use timezone-naive New York exchange session dates, not UTC timestamps')
-    if dates.isna().any() or dates.duplicated().any() or not dates.is_monotonic_increasing:
-        raise ValueError('Dates must be nonmissing, unique, and ascending')
-    if not dates.eq(dates.dt.normalize()).all():
-        raise ValueError('Daily dates must have no time-of-day component')
-    if (dates.dt.dayofweek >= 5).any():
-        raise ValueError('SPY daily sessions cannot be on weekends')
-    numbers = data[required[1:]]
-    if not all(pd.api.types.is_numeric_dtype(numbers[c]) for c in numbers):
-        raise ValueError('OHLCV must be numeric')
-    if not np.isfinite(numbers.to_numpy(dtype=float)).all():
-        raise ValueError('OHLCV must be finite and nonmissing')
-    if (data[['open', 'high', 'low', 'close']] <= 0).any().any():
-        raise ValueError('OHLC must be positive')
-    if (data['volume'] < 0).any() or (data['volume'] % 1 != 0).any():
-        raise ValueError('Volume must be a nonnegative integer')
-    if (data.high < data[['open', 'close', 'low']].max(axis=1)).any():
-        raise ValueError('Impossible high')
-    if (data.low > data[['open', 'close', 'high']].min(axis=1)).any():
-        raise ValueError('Impossible low')
+from src.data.validation import validate_market_data
 
 
 def future_mutation_test(data: pd.DataFrame, cutoff, fast_window: int, slow_window: int) -> bool:

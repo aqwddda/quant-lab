@@ -19,8 +19,8 @@ def test_adjusted_download_inclusive_end_and_frozen_file(monkeypatch, tmp_path):
                 'Close': [101., 102.], 'Volume': [1000, 2000],
             }, index=pd.date_range('2025-12-30', periods=2, tz='America/New_York', name='Date'))
 
-    monkeypatch.setattr('scripts.download_data.yf.Ticker', FakeTicker)
-    monkeypatch.setattr('scripts.download_data.yf.set_tz_cache_location', lambda path: None)
+    monkeypatch.setattr('yfinance.Ticker', FakeTicker)
+    monkeypatch.setattr('yfinance.set_tz_cache_location', lambda path: None)
     output = tmp_path / 'spy.parquet'
     download_data(output, '2025-12-30', '2025-12-31')
     assert calls['end'] == '2026-01-01'

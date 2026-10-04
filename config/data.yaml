@@ -1,0 +1,15 @@
+storage:
+  source_dir: data/source
+  normalized_dir: data/normalized
+  reference_dir: data/reference
+  manifest_dir: data/manifests
+
+defaults:
+  frequency: 1d
+
+providers:
+  yahoo:
+    enabled: true
+  tushare:
+    enabled: true
+    token_env: TUSHARE_TOKEN

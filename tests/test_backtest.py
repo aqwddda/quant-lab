@@ -48,3 +48,19 @@ def test_accounts_reconcile_every_day(bars):
         assert (account.equity == account.cash + account.position_market_value).all()
         assert (account.equity - 100000).to_numpy() == pytest.approx(
             (account.realized_pnl + account.unrealized_pnl).to_numpy())
+
+
+def test_generic_aapl_symbol(bars):
+    bars['symbol'] = 'AAPL'
+    result = run_backtest(bars, 20, 60, 100000, Costs(0.0005, 0.0002), symbol='AAPL')
+    assert not result.trades.empty
+    assert result.trades.symbol.eq('AAPL').all()
+
+
+def test_reject_multi_asset_and_wrong_symbol(bars):
+    bars['symbol'] = 'AAPL'
+    with pytest.raises(ValueError, match='does not match'):
+        run_backtest(bars, 20, 60, 100000, Costs(0, 0), symbol='MSFT')
+    bars.loc[0, 'symbol'] = 'MSFT'
+    with pytest.raises(ValueError, match='one symbol'):
+        run_backtest(bars, 20, 60, 100000, Costs(0, 0), symbol='AAPL')
