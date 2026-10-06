@@ -5,7 +5,7 @@ from quant_lab.backtest.execution import Fill
 
 
 @dataclass
-class Portfolio:
+class EquityPortfolio:
     cash: float
     quantity: int = 0
     cost_basis: float = 0.0  # includes entry commission
@@ -46,3 +46,7 @@ class Portfolio:
 
     def unrealized_pnl(self, close: float) -> float:
         return self.market_value(close) - self.cost_basis
+
+
+# Historical public name is retained for compatibility.
+Portfolio = EquityPortfolio

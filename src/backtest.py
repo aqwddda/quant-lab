@@ -1,4 +1,4 @@
-"""Compatibility module; use quant_lab.backtest.engine."""
+"""Compatibility module; use quant_lab.backtest.engine for new strategies."""
 import sys
 from importlib import import_module
-sys.modules[__name__] = import_module("quant_lab.backtest.engine")
+sys.modules[__name__] = import_module('quant_lab.backtest.legacy')

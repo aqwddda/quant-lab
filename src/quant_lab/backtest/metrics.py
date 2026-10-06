@@ -5,13 +5,15 @@ import pandas as pd
 
 
 def calculate_metrics(equity: pd.DataFrame, trades: pd.DataFrame, initial_cash: float,
-                      annualization_factor: int, risk_free_rate: float) -> dict:
+                      annualization_factor: int, risk_free_rate: float, *, metrics_timezone='UTC') -> dict:
     if equity.empty or initial_cash <= 0:
         raise ValueError('Require account history and positive initial cash')
     if type(annualization_factor) is not int or annualization_factor <= 0:
         raise ValueError('annualization_factor must be a positive integer')
     if not math.isfinite(risk_free_rate) or risk_free_rate <= -1:
         raise ValueError('Invalid annual risk-free rate')
+    if 'valuation_time' in equity or isinstance(equity.date.dtype, pd.DatetimeTZDtype):
+        equity = daily_equity_snapshot(equity, initial_cash, metrics_timezone=metrics_timezone)
     returns = equity.daily_return.to_numpy(dtype=float)
     final = float(equity.equity.iloc[-1])
     years = (equity.date.iloc[-1] - equity.date.iloc[0]).days / 365.25
@@ -51,3 +53,29 @@ def calculate_metrics(equity: pd.DataFrame, trades: pd.DataFrame, initial_cash: 
         'total_slippage_cost': float(trades.slippage_cost.sum()),
         'turnover': float(trades.trade_value.sum() / equity.equity.mean()),
     }
+
+
+def daily_equity_snapshot(equity, initial_cash, *, metrics_timezone='UTC'):
+    """Last known valuation per local day; risk uses daily returns, never bar returns.
+
+    A valuation exactly at midnight belongs to that new calendar day. No missing
+    day is filled. The day boundary/timezone is part of the experiment audit.
+    """
+    from zoneinfo import ZoneInfo
+    ZoneInfo(metrics_timezone)
+    time_column = 'valuation_time' if 'valuation_time' in equity else 'date'
+    times = pd.to_datetime(equity[time_column])
+    if not isinstance(times.dtype, pd.DatetimeTZDtype) or times.isna().any():
+        raise ValueError('Intraday valuations require timezone-aware timestamps')
+    if not times.is_monotonic_increasing or times.duplicated().any():
+        raise ValueError('Valuations must be strictly chronological')
+    local_days = times.dt.tz_convert(metrics_timezone).dt.tz_localize(None).dt.normalize()
+    frame = equity.copy()
+    frame['_day'] = local_days
+    result = frame.groupby('_day', sort=True).tail(1).reset_index(drop=True)
+    result['date'] = result.pop('_day').astype('datetime64[ns]')
+    previous = result.equity.shift(1).fillna(initial_cash)
+    result['daily_return'] = result.equity / previous - 1
+    peak = result.equity.cummax().clip(lower=initial_cash)
+    result['drawdown'] = result.equity / peak - 1
+    return result

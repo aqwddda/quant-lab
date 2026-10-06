@@ -1,5 +1,12 @@
-symbol: SPY
-market: US
-price_basis: legacy_provider_adjusted
-fast_window: 20
-slow_window: 60
+strategy:
+  name: sma_cross
+  params:
+    fast_window: 20
+    slow_window: 60
+
+data:
+  symbol: SPY
+  asset_class: equity
+  timeframe: 1d
+  price_basis: legacy_provider_adjusted
+  market: US

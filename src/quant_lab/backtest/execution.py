@@ -67,3 +67,62 @@ def execute_order(side: str, raw_open: float, cash: float, position: int, costs:
     value = quantity * price
     return Fill(side, float(raw_open), price, quantity, value,
                 value * costs.commission_rate, quantity * abs(price - raw_open))
+
+
+from typing import Protocol
+
+
+class ExecutionModel(Protocol):
+    def reset(self): ...
+    def execute(self, target, raw_open, account): ...
+    def signal(self, target, account): ...
+
+
+class EquityCashExecutionModel:
+    def __init__(self, costs):
+        self.costs = costs
+
+    def reset(self):
+        pass
+
+    def execute(self, target, raw_open, account):
+        if target is None:
+            return None
+        if target == 1 and account.quantity == 0:
+            side = 'BUY'
+        elif target == 0 and account.quantity > 0:
+            side = 'SELL'
+        else:
+            return None
+        return execute_order(side, raw_open, account.cash, account.quantity, self.costs)
+
+    def signal(self, target, account):
+        if target is None:
+            return 'WAIT'
+        if target == 1 and account.quantity == 0:
+            return 'BUY'
+        if target == 0 and account.quantity > 0:
+            return 'SELL'
+        return 'HOLD'
+
+
+class EquityBuyAndHoldExecutionModel(EquityCashExecutionModel):
+    """One attempt on the first open eligible after the strategy warmup."""
+    def reset(self):
+        self.entered = False
+
+    def execute(self, target, raw_open, account):
+        if target is None or self.entered:
+            return None
+        self.entered = True
+        return execute_order('BUY', raw_open, account.cash, account.quantity, self.costs)
+
+    def signal(self, target, account):
+        if target is None:
+            return 'WAIT'
+        return 'HOLD' if self.entered else 'BUY'
+
+
+class FxExecutionModel:
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError('Forex execution requires confirmed spread, lot, leverage, margin, swap and short rules')
