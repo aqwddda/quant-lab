@@ -1,0 +1,7 @@
+{
+  "description": "Human marked: raw 1+2 merge UP to [5,3]; raw 3 is a distinct DOWN bar relative to that merged range.",
+  "raw_ranges": [[3,1],[5,2],[4,3],[4.5,2.5],[6,4],[5,3]],
+  "expected_merged": [[3,1,[0]],[5,3,[1,2]],[4.5,2.5,[3]],[6,4,[4]],[5,3,[5]]],
+  "expected_fractals": [["top",1,5,3],["bottom",2,2.5,4],["top",3,6,5]],
+  "expected_strokes": []
+}
