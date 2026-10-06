@@ -125,3 +125,26 @@ def test_qfq_anchor_uses_selected_request_end(tmp_path,version):
     selected=load_dataset('anchor',store=store,session_timezone='Asia/Shanghai',
         end='2020-01-02T23:59:59+08:00',price_basis='qfq')
     assert selected.close.tolist()==[5.,10.]
+
+
+def test_optional_available_at_cannot_claim_earlier_or_later_close():
+    data=frame()
+    data['available_at']=data.timestamp+pd.Timedelta(minutes=16)
+    with pytest.raises(ValueError,match='fixed bar end'):
+        validate_bars_v3(data,'15m')
+
+
+def test_multi_symbol_and_futures_metadata(tmp_path):
+    store=DataStore(tmp_path)
+    first=frame().drop(columns='tick_volume')
+    first['symbol']='ESZ26'
+    first['open_interest']=1234
+    second=first.copy();second['symbol']='ESH27'
+    data=pd.concat([first,second],ignore_index=True).sort_values(['timestamp','symbol']).reset_index(drop=True)
+    manifest=store.save_bars_v3(data,dataset_id='futures_reference',provider='local',provider_version='1',
+        instruments=[Instrument('ESZ26','ESZ6','futures','CME',tick_size=.25,contract_multiplier=50,expiry='2026-12-18'),
+            Instrument('ESH27','ESH7','futures','CME',tick_size=.25,contract_multiplier=50,expiry='2027-03-19')],
+        timeframe='15m',source_timezone='UTC',source_frames={'bars':data})
+    assert len(load_dataset('futures_reference',store=store))==8
+    assert load_dataset('futures_reference',symbols=['ESZ26'],store=store).symbol.eq('ESZ26').all()
+    assert manifest['instruments'][0]['contract_multiplier']==50

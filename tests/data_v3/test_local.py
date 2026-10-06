@@ -48,3 +48,12 @@ def test_local_failure_preserves_source(tmp_path):
             source_timezone='UTC',timestamp_semantics='bar_start',store=store,dataset_id='bad')
     assert store.resolve('data/source/local/bad/original.bin').read_bytes()==path.read_bytes()
     assert not store.manifest_path('bad').exists()
+
+
+def test_aware_source_offsets_match_declared_zone(tmp_path):
+    path=tmp_path/'offset.csv'
+    path.write_text('timestamp,open,high,low,close\n2020-01-01T00:00:00+08:00,1,1.2,0.8,1\n')
+    with pytest.raises(ValueError,match='source_timezone'):
+        import_local_dataset(path,instrument=Instrument('EURUSD','EURUSD','forex','fixture'),
+            timeframe='1m',source_timezone='UTC',timestamp_semantics='bar_start',
+            store=DataStore(tmp_path/'store'),dataset_id='wrong_zone')

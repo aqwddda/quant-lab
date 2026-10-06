@@ -184,5 +184,5 @@ def validate_bars_v3(data, timeframe):
     if 'available_at' in data:
         if (not isinstance(data.available_at.dtype, pd.DatetimeTZDtype)
                 or str(data.available_at.dt.tz) != 'UTC' or data.available_at.isna().any()
-                or (data.available_at <= data.timestamp).any()):
-            raise ValueError('available_at must be UTC and after bar start')
+                or not data.available_at.eq(data.timestamp + Timeframe.parse(timeframe).duration).all()):
+            raise ValueError('available_at must be UTC and equal fixed bar end')

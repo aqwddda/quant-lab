@@ -80,11 +80,12 @@ def write_reports(result, report, output):
         ('drawdown.png', 'drawdown', 'Drawdown (%)', 100),
     ]:
         fig, ax = plt.subplots(figsize=(11, 5), layout='constrained')
-        ax.plot(result.equity.date, result.equity[column] * multiplier,
+        axis_time = 'valuation_time' if 'valuation_time' in result.equity else 'date'
+        ax.plot(result.equity[axis_time], result.equity[column] * multiplier,
                 label=f"{strategy['symbol']} SMA {strategy['fast_window']}/{strategy['slow_window']}")
-        ax.plot(result.benchmark_equity.date, result.benchmark_equity[column] * multiplier,
+        ax.plot(result.benchmark_equity[axis_time], result.benchmark_equity[column] * multiplier,
                 label=f"{strategy['symbol']} buy & hold", alpha=0.8)
-        ax.set(xlabel='Exchange session date', ylabel=ylabel,
+        ax.set(xlabel='UTC valuation timestamp' if axis_time == 'valuation_time' else 'Exchange session date', ylabel=ylabel,
                title=f"Net of commission and slippage; {strategy['price_basis']} OHLC")
         ax.legend()
         ax.grid(alpha=0.25)

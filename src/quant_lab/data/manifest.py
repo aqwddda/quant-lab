@@ -177,4 +177,21 @@ def validate_manifest_v3(manifest):
                 raise ValueError('Invalid manifest path/checksum')
     if manifest['source_sha256'] != manifest['source_files']['bars']['sha256'] or manifest['normalized_sha256'] != manifest['normalized_files']['bars']['sha256']:
         raise ValueError('Manifest primary checksum mismatch')
+    lineage = manifest['lineage']
+    if lineage is not None:
+        required_lineage = {'source_dataset_id','source_timeframe','target_timeframe',
+            'aggregation_timezone','anchor','source_normalized_sha256','aggregation_rule'}
+        if not isinstance(lineage,dict) or not required_lineage.issubset(lineage):
+            raise ValueError('Resampling lineage schema mismatch')
+        safe_component(lineage['source_dataset_id'])
+        if (lineage['target_timeframe'] != manifest['timeframe']
+                or lineage['aggregation_timezone'] != manifest['aggregation_timezone']
+                or lineage['anchor'] != manifest['anchor']):
+            raise ValueError('Resampling lineage metadata mismatch')
+        if not Timeframe.parse(lineage['source_timeframe']).can_resample_to(manifest['timeframe']):
+            raise ValueError('Resampling lineage timeframe mismatch')
+        if not isinstance(lineage['aggregation_rule'],str) or not lineage['aggregation_rule']:
+            raise ValueError('Aggregation rule required')
+        if not re.fullmatch('[0-9a-f]{64}',lineage['source_normalized_sha256']):
+            raise ValueError('Invalid parent checksum')
     json.dumps(manifest, allow_nan=False)

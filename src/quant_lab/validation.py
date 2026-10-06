@@ -63,6 +63,8 @@ def chan_future_mutation_test(bars, cutoff, config=None):
     altered = [b if b.available_at <= cutoff else replace(b,open=b.open*7,high=b.high*7,
         low=b.low*7,close=b.close*7) for b in bars]
     after = ChanAnalyzer(config).extend(altered)
-    assert tuple(f for f in before.fractals if f.confirmed_at <= cutoff) == tuple(f for f in after.fractals if f.confirmed_at <= cutoff)
-    assert tuple(s for s in before.confirmed_strokes if s.confirmed_at <= cutoff) == tuple(s for s in after.confirmed_strokes if s.confirmed_at <= cutoff)
+    if tuple(f for f in before.fractals if f.confirmed_at <= cutoff) != tuple(f for f in after.fractals if f.confirmed_at <= cutoff):
+        raise AssertionError('Future mutation changed confirmed fractals')
+    if tuple(s for s in before.confirmed_strokes if s.confirmed_at <= cutoff) != tuple(s for s in after.confirmed_strokes if s.confirmed_at <= cutoff):
+        raise AssertionError('Future mutation changed confirmed strokes')
     return True

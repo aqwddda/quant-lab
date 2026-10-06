@@ -70,7 +70,8 @@ def download_dataset_v3(provider, symbol, start, end, timeframe='1d', *, store=N
     if store.manifest_path(dataset_id).exists() or store.resolve(directory).exists():
         raise FileExistsError('Refusing to overwrite frozen dataset')
     snapshot = transport.fetch_snapshot(symbol, start, end, timeframe.value)
-    sources = store.freeze_sources(dataset_id, provider, snapshot.source_frames)
+    sources = store.freeze_sources(dataset_id, provider, {**snapshot.source_frames,
+        'request': {'symbol':symbol,'start':start,'end_inclusive':end,'timeframe':timeframe.value}})
     normalized = {'yahoo': normalize_yahoo, 'tushare': normalize_tushare}[provider](snapshot.prepared, symbol)
     zone = transport.exchange_timezone if provider == 'yahoo' else 'Asia/Shanghai'
     bars, instruments = daily_snapshot_v3(normalized, provider=provider, session_timezone=zone)

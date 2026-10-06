@@ -60,3 +60,14 @@ def test_resampled_frozen_lineage(tmp_path):
     assert manifest['anchor']=='00:00'
     assert store.load_manifest('source')==parent
     assert len(store.verify(manifest)['bars'])==1
+
+
+def test_lineage_metadata_is_validated(tmp_path):
+    from quant_lab.data.manifest import validate_manifest
+    store=DataStore(tmp_path)
+    store.save_bars_v3(minutes(),dataset_id='source',provider='local',provider_version='1',
+        instruments=[Instrument('EURUSD','EURUSD','forex','fixture')],timeframe='1m',source_timezone='UTC',source_frames={'bars':minutes()})
+    manifest=resample_dataset('source',target_timeframe='4h',aggregation_timezone='UTC',anchor='00:00',dataset_id='target',store=store)
+    manifest['lineage']['anchor']='01:00'
+    with pytest.raises(ValueError,match='lineage metadata'):
+        validate_manifest(manifest)

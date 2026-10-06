@@ -344,6 +344,22 @@ class DataStore:
                 if name not in VALIDATORS:
                     raise ValueError(f'Unknown normalized frame: {name}')
                 VALIDATORS[name](frame)
+                if 'provider' in frame and not frame.provider.eq(manifest['provider']).all():
+                    raise ValueError('Manifest provider mismatch')
+                if 'symbol' in frame and not frame.symbol.isin(manifest['symbols']).all():
+                    raise ValueError('Manifest reference symbol mismatch')
+        if 'instruments' in frames and sorted(frames['instruments'].symbol) != manifest['symbols']:
+            raise ValueError('Manifest instrument symbol mismatch')
+        if 'adjustments' in frames:
+            if 'date' not in bars:
+                raise ValueError('Equity adjustments require explicit session keys')
+            factors = frames['adjustments']
+            matched = bars[['date','symbol']].merge(factors,on=['date','symbol'],how='left',validate='one_to_one')
+            if matched.adj_factor.isna().any():
+                raise ValueError('Adjustments must cover every frozen bar key')
+            available = bool(factors.factor_semantics.eq('provider_adjusted_close_ratio').all())
+            if manifest['price_data']['provider_adjusted_available'] != available:
+                raise ValueError('Manifest adjustment semantics mismatch')
         if manifest['price_data']['adjustment_available'] != ('adjustments' in frames):
             raise ValueError('Adjustment availability mismatch')
         return frames

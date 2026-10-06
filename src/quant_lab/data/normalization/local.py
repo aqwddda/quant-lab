@@ -17,6 +17,11 @@ def normalize_local(prepared):
     dates = pd.to_datetime(frame.timestamp, errors='raise')
     if dates.dt.tz is None:
         dates = dates.dt.tz_localize(request['source_timezone'], ambiguous='raise', nonexistent='raise')
+    else:
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(request['source_timezone'])
+        if any(stamp.utcoffset() != stamp.to_pydatetime().astimezone(zone).utcoffset() for stamp in dates):
+            raise ValueError('Aware source offsets do not match declared source_timezone')
     dates = dates.dt.tz_convert('UTC')
     if TimestampSemantics(request['timestamp_semantics']) == TimestampSemantics.BAR_END:
         dates = dates - timeframe.duration
