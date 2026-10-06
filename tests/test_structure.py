@@ -10,12 +10,12 @@ def test_source_root_contains_only_current_modules():
     source=ROOT/'src'
     assert {p.name for p in source.glob('*.py')}=={'__init__.py','validation.py'}
     assert {p.name for p in source.iterdir() if p.is_dir() and p.name!='__pycache__'}=={
-        'market','data','chan','strategies','backtest'}
+        'market','data','chan','strategies','backtest','visualization'}
 
 
 def test_modules_have_their_actual_import_names():
     for name in ['src.data.loader','src.data.manifest','src.data.store','src.chan',
-        'src.market','src.strategies.sma','src.backtest.engine','src.validation']:
+        'src.market','src.strategies.sma','src.backtest.engine','src.validation','src.visualization']:
         assert importlib.import_module(name).__name__==name
 
 

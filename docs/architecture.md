@@ -31,6 +31,7 @@ flowchart TD
 | `src/data/loader.py` | 显式版本读取、筛选、DataFrame→Bar |
 | `src/data/resample.py` | 显式时区/anchor、完整聚合窗口、父版本 lineage |
 | `src/chan/` | 增量包含/分型/笔；纯 Python，不导入数据层或绘图库 |
+| `src/visualization/` | 只读 OHLC candle、merged range、分型/笔与 overlay PNG；复用已有结构 |
 | `src/strategies/` | 当前已完成 Bar→不可变 TargetPosition；不管理账户 |
 | `src/backtest/engine.py` | 推进时钟；不导入 SMA 或 Chan 专属实现 |
 | `src/backtest/execution.py` | 成交价格/成本/constraints；Equity long/cash，FX 未定义 |

@@ -113,7 +113,8 @@ python scripts/run_backtest.py --strategy-config config/chan_fx.yaml \
   --backtest-config /path/to/observation.yaml --dataset-id <id> --observe-only
 ```
 
-导出 raw_bars、merged_bars、fractals、strokes 的 CSV 与 chan.json，可选静态 chan.png。
+导出 raw_bars、merged_bars、fractals、strokes 的 CSV、chan.json 与摘要；`--plot` 生成原始 K、merged range、Chan 结构和原始 K overlay 四张 PNG。
+可用 `--manifest <path>` 指定版本；四张图的含义及人工核对流程见 [Chan 可视化](docs/chan-visualization.md)。
 confirmed_at 与 pivot_time 分开，confirmed 笔不回写，最终 tentative 可以延伸。初始包含默认报错；显式 up/down 是实验选择。具体规则见 Chan 文档。
 Chan-FX 只观察结构，不生成订单或 Forex 收益。未定义的买卖规则和 Forex 执行模型明确 NotImplemented。
 

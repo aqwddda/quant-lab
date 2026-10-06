@@ -13,13 +13,12 @@ def verify_dataset(*, dataset_id=None, manifest_path=None, store=None):
     return manifest, store.verify(manifest)
 
 
-def load_dataset(dataset_id, *, store=None, symbols=None, start=None, end=None,
+def load_dataset(dataset_id=None, *, manifest_path=None, store=None, symbols=None, start=None, end=None,
                  timeframe=None, price_basis='raw'):
     """Read verified UTC observations, then select symbols and bar-start bounds."""
     from src.market import Timeframe
     store = store or DataStore()
-    manifest = store.load_manifest(dataset_id)
-    frames = store.verify(manifest)
+    manifest, frames = verify_dataset(dataset_id=dataset_id, manifest_path=manifest_path, store=store)
     actual_timeframe = Timeframe.parse(manifest['timeframe'])
     if timeframe is not None and Timeframe.parse(timeframe) != actual_timeframe:
         raise ValueError('Dataset timeframe mismatch')

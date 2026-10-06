@@ -28,7 +28,8 @@ def test_observer_has_no_orders_and_reset():
     assert chan_future_mutation_test(history,history[5].available_at)
 
 
-def test_inspection_cli(tmp_path):
+@pytest.mark.parametrize('identity', ['dataset-id', 'manifest'])
+def test_inspection_cli(tmp_path, identity):
     root=Path(__file__).resolve().parents[2]
     fixture=json.loads((root/'tests/fixtures/chan/alternating_strokes.json').read_text())
     frame=pd.DataFrame([{'timestamp':datetime(2020,1,1,tzinfo=timezone.utc)+timedelta(minutes=i),
@@ -37,15 +38,21 @@ def test_inspection_cli(tmp_path):
     store=DataStore(tmp_path/'store')
     store.save_dataset(frame,dataset_id='chan_fixture',provider='local',provider_version='1',
         instruments=[Instrument('EURUSD','EURUSD.a','forex','fixture')],timeframe='1m',source_timezone='UTC',source_frames={'bars':frame})
-    proc=subprocess.run([sys.executable,str(root/'scripts/inspect_chan.py'),'--dataset-id','chan_fixture',
+    identifier = 'chan_fixture' if identity == 'dataset-id' else str(store.manifest_path('chan_fixture'))
+    proc=subprocess.run([sys.executable,str(root/'scripts/inspect_chan.py'),f'--{identity}',identifier,
+        '--start','2020-01-01T00:00:00Z','--end','2020-01-01T00:14:00Z',
         '--symbol','EURUSD','--root',str(store.root),'--output',str(tmp_path/'output'),'--plot'],capture_output=True,text=True)
     assert proc.returncode==0,proc.stderr
     report=json.loads((tmp_path/'output/chan.json').read_text())
     assert report['audit']['mode']=='structure_observation_only'
     assert len(report['strokes'])==3
     assert report['strokes'][-1]['status']=='tentative'
-    for name in ['raw_bars.csv','merged_bars.csv','fractals.csv','strokes.csv','chan.json','chan.png']:
-        assert (tmp_path/'output'/name).is_file()
+    assert len(report['raw_bars']) == len(fixture['raw_ranges'])
+    assert report['audit']['dataset_id'] == 'chan_fixture'
+    for name in ['raw_bars.csv','merged_bars.csv','fractals.csv','strokes.csv','chan.json',
+        '01_raw_candles.png','02_merged_bars.png','03_chan_structure.png','04_raw_with_chan_overlay.png',
+        '05_summary.txt']:
+        assert (tmp_path/'output'/name).stat().st_size > 0
 
 
 def test_chan_core_has_no_dataframe_or_provider_imports():
@@ -54,7 +61,8 @@ def test_chan_core_has_no_dataframe_or_provider_imports():
     for path in folder.glob('*.py'):
         for node in ast.walk(ast.parse(path.read_text())):
             names = [a.name for a in node.names] if isinstance(node,ast.Import) else [node.module or ''] if isinstance(node,ast.ImportFrom) else []
-            assert not any(name.split('.')[0] in {'pandas','numpy','yfinance','tushare','matplotlib'} or name.startswith('src.data') for name in names)
+            assert not any(name.split('.')[0] in {'pandas','numpy','yfinance','tushare','matplotlib',
+                'mplfinance','plotly','streamlit'} or name.startswith(('src.data', 'src.visualization')) for name in names)
 
 
 def test_chan_config_observer_cli(tmp_path):

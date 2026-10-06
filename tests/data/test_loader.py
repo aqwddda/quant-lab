@@ -25,7 +25,21 @@ def test_multi_symbol_long_format(store,canonical,dataset_options):
 def test_version_selection_is_explicit(store,saved,canonical,dataset_options):
     store.save_dataset(canonical,dataset_id='second_snapshot',source_frames={'bars':canonical},**dataset_options)
     assert load_dataset(saved['dataset_id'],store=store).attrs['manifests'][0]['dataset_id']==saved['dataset_id']
-    with pytest.raises(TypeError): load_dataset(store=store)
+    with pytest.raises(ValueError, match='Specify exactly one'):
+        load_dataset(store=store)
+
+
+def test_explicit_manifest_uses_same_verified_filtering(store, saved):
+    path = store.manifest_path(saved['dataset_id'])
+    renamed = path.with_name('explicit_case.json')
+    path.rename(renamed)
+    path.with_suffix('.json.sha256').rename(renamed.with_suffix('.json.sha256'))
+    loaded = load_dataset(manifest_path=renamed, store=store, symbols=['AAPL'],
+        start='2020-01-08T00:00Z', end='2020-01-15T00:00Z')
+    assert loaded.attrs['manifests'][0]['dataset_id'] == saved['dataset_id']
+    assert len(loaded) > 0
+    with pytest.raises(ValueError, match='Specify exactly one'):
+        load_dataset(saved['dataset_id'], manifest_path=renamed, store=store)
 
 
 def test_checksum_checked_before_filter(store,saved,canonical):
