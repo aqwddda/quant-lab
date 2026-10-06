@@ -1,10 +1,4 @@
-"""One download's supplier snapshots and its explicitly prepared session labels."""
-from dataclasses import dataclass, field
-
-
-@dataclass
-class ProviderSnapshot:
-    source_frames: dict
-    prepared: dict
-    provider_version: str
-    assumptions: list[str] = field(default_factory=list)
+"""Compatibility module; use quant_lab.data.models."""
+import sys
+from importlib import import_module
+sys.modules[__name__] = import_module("quant_lab.data.models")

@@ -5,11 +5,10 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 
-from scripts.verify_dataset import dataset_arguments, read_dataset
-from src.data.adjustment import adjust_bars
-from src.data.schema import PRICE_BASES
+from quant_lab.data.inspection import dataset_arguments, read_dataset
+from quant_lab.data.adjustment import adjust_bars
+from quant_lab.data.schema import PRICE_BASES
 
 
 def main():

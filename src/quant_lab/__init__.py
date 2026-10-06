@@ -1,0 +1,1 @@
+"""Auditable market research infrastructure."""

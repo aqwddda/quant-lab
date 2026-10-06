@@ -4,25 +4,12 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 
-from src.data.loader import verify_dataset
-from src.data.store import DataStore
-
-
-def dataset_arguments(parser):
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--dataset-id')
-    group.add_argument('--manifest', type=Path)
-    group.add_argument('--legacy-path', type=Path)
-    parser.add_argument('--data-config', type=Path, default=ROOT / 'config/data.yaml')
-    parser.add_argument('--root', type=Path, default=ROOT)
+from quant_lab.data.loader import verify_dataset
+from quant_lab.data.store import DataStore
 
 
-def read_dataset(args):
-    store = DataStore.from_config(args.data_config, args.root)
-    return verify_dataset(dataset_id=args.dataset_id, manifest_path=args.manifest,
-                          legacy_path=args.legacy_path, store=store)
+from quant_lab.data.inspection import dataset_arguments, read_dataset
 
 
 def main():

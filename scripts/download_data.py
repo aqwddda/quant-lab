@@ -6,14 +6,13 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 
 import yaml
-from src.data.store import DataStore
-from src.data.manifest import safe_component
-from src.data.normalize import normalize_yahoo, normalize_tushare
-from src.data.providers import get_provider, PROVIDERS
-from src.data.providers.base import check_request
+from quant_lab.data.store import DataStore
+from quant_lab.data.manifest import safe_component
+from quant_lab.data.normalize import normalize_yahoo, normalize_tushare
+from quant_lab.data.providers import get_provider, PROVIDERS
+from quant_lab.data.providers.base import check_request
 
 
 def download_data(output: Path, start: str, end: str):

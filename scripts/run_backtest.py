@@ -8,7 +8,6 @@ import platform
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 os.environ.setdefault('MPLCONFIGDIR', str(ROOT / '.cache' / 'matplotlib'))
 
 import matplotlib
@@ -16,13 +15,13 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 import yaml
-from src.backtest import run_backtest
-from src.data.manifest import file_sha256
-from src.data.loader import load_bars
-from src.data.store import DataStore
-from src.execution import Costs
-from src.metrics import calculate_metrics
-from src.validation import future_mutation_test
+from quant_lab.backtest.engine import run_backtest
+from quant_lab.data.manifest import file_sha256
+from quant_lab.data.loader import load_bars
+from quant_lab.data.store import DataStore
+from quant_lab.backtest.execution import Costs
+from quant_lab.backtest.metrics import calculate_metrics
+from quant_lab.validation import future_mutation_test
 
 
 def read_config(path, expected):

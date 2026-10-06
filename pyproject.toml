@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-lab"
+version = "0.3.0"
+description = "Auditable market data, structure and backtesting research"
+requires-python = ">=3.11"
+dependencies = ["pandas>=2.2,<4", "numpy>=1.26,<3", "pyarrow>=15,<26", "PyYAML>=6,<7", "matplotlib>=3.8,<4", "yfinance>=0.2.54,<2", "tushare>=1.4,<2"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["quant_lab*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
