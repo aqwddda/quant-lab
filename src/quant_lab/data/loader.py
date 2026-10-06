@@ -136,19 +136,7 @@ def load_dataset(dataset_id, *, store=None, symbols=None, start=None, end=None,
     if manifest['schema_version'] == 2:
         if session_timezone is None:
             raise ValueError('V2 session label adapter requires explicit session_timezone')
-        if price_basis != 'raw':
-            from quant_lab.data.adjustment import adjust_bars
-            bars = adjust_bars(bars, frames.get('adjustments'), method=price_basis,
-                anchor_end=manifest['requested_end_inclusive'])
         bars['timestamp'] = bars.date.dt.tz_localize(session_timezone, ambiguous='raise', nonexistent='raise').dt.tz_convert('UTC')
-        bars = bars.drop(columns='date')
-    elif price_basis != 'raw':
-        # V3 equity normalization retains exact legacy session keys for adjustment.
-        if 'date' not in bars:
-            raise ValueError('Adjustment data unavailable for this dataset')
-        from quant_lab.data.adjustment import adjust_bars
-        bars = adjust_bars(bars, frames.get('adjustments'), method=price_basis,
-            anchor_end=bars.date.max())
     if symbols is not None:
         if not symbols or len(symbols) != len(set(symbols)) or not set(symbols).issubset(manifest['symbols']):
             raise ValueError('Requested symbol mismatch')
@@ -164,6 +152,18 @@ def load_dataset(dataset_id, *, store=None, symbols=None, start=None, end=None,
         bars = bars.loc[bars.timestamp >= pd.Timestamp(start)]
     if end is not None:
         bars = bars.loc[bars.timestamp <= pd.Timestamp(end)]
+    if price_basis not in PRICE_BASES:
+        raise ValueError(f'Unknown price basis: {price_basis}')
+    if price_basis != 'raw':
+        if 'date' not in bars:
+            raise ValueError('Adjustment data unavailable for this dataset')
+        from quant_lab.data.adjustment import adjust_bars
+        zone = session_timezone or manifest.get('session_timezone') or 'UTC'
+        anchor_end = (pd.Timestamp(end).tz_convert(zone).tz_localize(None).normalize()
+            if end is not None else bars.date.max())
+        bars = adjust_bars(bars, frames.get('adjustments'), method=price_basis, anchor_end=anchor_end)
+    if manifest['schema_version'] == 2:
+        bars = bars.drop(columns='date')
     from quant_lab.data.validation import validate_bars_v3
     bars = bars.reset_index(drop=True)
     validate_bars_v3(bars, actual_timeframe)

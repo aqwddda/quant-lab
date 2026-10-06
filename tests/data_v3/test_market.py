@@ -102,3 +102,26 @@ def test_provider_capabilities():
     YahooProvider.capabilities.require('equity','1d')
     with pytest.raises(NotImplementedError):
         YahooProvider.capabilities.require('forex','15m')
+
+
+@pytest.mark.parametrize('version',[2,3])
+def test_qfq_anchor_uses_selected_request_end(tmp_path,version):
+    store=DataStore(tmp_path)
+    dates=pd.bdate_range('2020-01-01',periods=3).astype('datetime64[ns]')
+    bars=pd.DataFrame({'date':dates,'symbol':['000001.SZ']*3,'open':[10.]*3,'high':[11.]*3,
+        'low':[9.]*3,'close':[10.]*3,'volume':[1000]*3})
+    adjustments=pd.DataFrame({'date':dates,'symbol':['000001.SZ']*3,'adj_factor':[1.,2.,4.],
+        'provider':['fixture']*3,'factor_semantics':['cumulative_adjustment_factor']*3})
+    if version==2:
+        store.save_dataset(bars,dataset_id='anchor',provider='fixture',provider_version='1',
+            market='CN',asset_type='EQUITY',start='2020-01-01',end='2020-01-03',
+            adjustments=adjustments,source_frames={'bars':bars})
+    else:
+        bars['timestamp']=bars.date.dt.tz_localize('Asia/Shanghai').dt.tz_convert('UTC')
+        store.save_bars_v3(bars,dataset_id='anchor',provider='fixture',provider_version='1',
+            instruments=[Instrument('000001.SZ','000001.SZ','equity','SZSE')],timeframe='1d',
+            source_timezone='Asia/Shanghai',session_timezone='Asia/Shanghai',
+            source_frames={'bars':bars},normalized_frames={'adjustments':adjustments})
+    selected=load_dataset('anchor',store=store,session_timezone='Asia/Shanghai',
+        end='2020-01-02T23:59:59+08:00',price_basis='qfq')
+    assert selected.close.tolist()==[5.,10.]
