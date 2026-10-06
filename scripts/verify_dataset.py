@@ -19,9 +19,10 @@ def main():
     try:
         manifest, frames = read_dataset(args)
         bars = frames['bars']
+        dates = bars['timestamp' if manifest['schema_version'] == 3 else 'date']
         print(f"PASS dataset_id={manifest['dataset_id']} provider={manifest['provider']} "
-              f"market={manifest['market']} symbols={manifest['symbols']} rows={len(bars)} "
-              f"range={bars.date.min().date()}..{bars.date.max().date()} "
+              f"market={manifest.get('market', [x['venue'] for x in manifest.get('instruments', [])])} symbols={manifest['symbols']} rows={len(bars)} "
+              f"range={dates.min()}..{dates.max()} "
               f"SHA={manifest['normalized_sha256']}")
     except Exception as error:
         print(f'FAIL {type(error).__name__}: {error}', file=sys.stderr)

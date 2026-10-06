@@ -15,3 +15,7 @@ def require_columns(data, columns):
     missing = set(columns) - set(data.columns)
     if missing or data.columns.duplicated().any():
         raise ValueError(f'Schema mismatch: missing {sorted(missing)} or duplicate columns')
+
+V3_SCHEMA_VERSION = 3
+V3_BAR_COLUMNS = ['timestamp', 'symbol', 'open', 'high', 'low', 'close']
+V3_OPTIONAL_COLUMNS = ['volume', 'tick_volume', 'amount', 'open_interest']

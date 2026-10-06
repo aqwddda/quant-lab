@@ -169,7 +169,7 @@ class DataStore:
             manifests = [read_manifest(path) for path in sorted(directory.glob('*.json'))]
         selected = []
         for symbol in symbols:
-            matches = [m for m in manifests if m['market'] == market and symbol in m['symbols']
+            matches = [m for m in manifests if m['schema_version'] == 2 and m['market'] == market and symbol in m['symbols']
                        and m['frequency'] == '1d' and m['requested_start'] <= start
                        and m['requested_end_inclusive'] >= end
                        and (not isinstance(dataset_id, dict) or m['dataset_id'] == dataset_id[symbol])]
@@ -189,6 +189,8 @@ class DataStore:
 
     def verify(self, manifest):
         validate_manifest(manifest)
+        if manifest['schema_version'] == 3:
+            return self._verify_v3(manifest)
         for entry in manifest['source_files'].values():
             path = self.resolve(entry['path'])
             if file_sha256(path) != entry['sha256']:
@@ -233,4 +235,108 @@ class DataStore:
             reference = frames['instruments']
             if sorted(reference.symbol) != manifest['symbols'] or not reference.asset_type.eq(manifest['asset_type']).all():
                 raise ValueError('Manifest instrument/asset type mismatch')
+        return frames
+
+    def save_bars_v3(self, bars, *, dataset_id, provider, provider_version, instruments,
+                     timeframe, source_timezone, source_frames=None, source_files=None,
+                     assumptions=(), session_timezone=None, aggregation_timezone=None,
+                     anchor=None, lineage=None, normalized_frames=None):
+        """Publish V3 only after the frozen sources and normalized files verify."""
+        from dataclasses import asdict
+        from zoneinfo import ZoneInfo
+        from quant_lab.market import Instrument, Timeframe
+        from quant_lab.data.validation import validate_bars_v3
+        from quant_lab.data.manifest import V3_IDENTITY_KEYS
+        timeframe = Timeframe.parse(timeframe)
+        validate_bars_v3(bars, timeframe)
+        safe_component(dataset_id)
+        safe_component(provider)
+        ZoneInfo(source_timezone)
+        for zone in (session_timezone, aggregation_timezone):
+            if zone is not None:
+                ZoneInfo(zone)
+        instruments = [x if isinstance(x, Instrument) else Instrument(**x) for x in instruments]
+        symbols = sorted(bars.symbol.unique().tolist())
+        if sorted(x.symbol for x in instruments) != symbols or len(set(symbols)) != len(instruments):
+            raise ValueError('Instrument/symbol mismatch')
+        if len({(x.asset_class, x.venue) for x in instruments}) != 1:
+            raise ValueError('One asset class and venue per frozen dataset required')
+        item = instruments[0]
+        label = item.symbol if len(symbols) == 1 else 'multi'
+        for value in (item.venue, label):
+            safe_component(value)
+        source_dir = Path(self.storage['source_dir']) / provider / dataset_id
+        manifest_path = self.manifest_path(dataset_id)
+        if manifest_path.exists() or manifest_path.with_suffix('.json.sha256').exists():
+            raise FileExistsError('Refusing to overwrite frozen dataset')
+        if source_frames is None and source_files is None:
+            raise ValueError('Source snapshots are required')
+        if source_files is None:
+            source_files = self.freeze_sources(dataset_id, provider, source_frames)
+        source_files = {name: dict(entry) for name, entry in source_files.items()}
+        for entry in source_files.values():
+            path = self.resolve(entry['path'])
+            if not path.is_relative_to(self.resolve(source_dir)) or file_sha256(path) != entry['sha256']:
+                raise ValueError('Source identity/path/checksum mismatch')
+        if self.resolve(source_dir / 'identity.json').exists():
+            raise FileExistsError('Refusing to overwrite frozen identity')
+        frames = dict(normalized_frames or {})
+        if 'bars' in frames:
+            raise ValueError('bars is a reserved normalized name')
+        frames = {'bars': bars, **frames}
+        normalized = {}
+        for name, frame in frames.items():
+            safe_component(name)
+            relative = (Path(self.storage['normalized_dir']) / name / item.asset_class.value /
+                item.venue / timeframe.value / label / dataset_id / (name + '.parquet'))
+            normalized[name] = self._save_frame(relative, frame)
+        manifest = {'schema_version': 3, 'normalizer_version': 3, 'dataset_id': dataset_id,
+            'provider': provider, 'provider_version': str(provider_version),
+            'instruments': [{**asdict(x), 'asset_class': x.asset_class.value} for x in instruments],
+            'symbols': symbols, 'timeframe': timeframe.value, 'timestamp_semantics': 'bar_start',
+            'source_timezone': source_timezone, 'session_timezone': session_timezone,
+            'aggregation_timezone': aggregation_timezone, 'anchor': anchor, 'lineage': lineage,
+            'actual_start': bars.timestamp.min().isoformat(), 'actual_end': bars.timestamp.max().isoformat(),
+            'rows': len(bars), 'downloaded_at_utc': datetime.now(timezone.utc).isoformat(),
+            'price_data': {'raw_ohlc': True, 'adjustment_available': 'adjustments' in frames,
+                'provider_adjusted_available': bool('adjustments' in frames and
+                    frames['adjustments'].factor_semantics.eq('provider_adjusted_close_ratio').all())},
+            'assumptions': list(assumptions), 'source_files': source_files,
+            'normalized_files': normalized, 'source_sha256': source_files['bars']['sha256'],
+            'normalized_sha256': normalized['bars']['sha256']}
+        identity_path = source_dir / 'identity.json'
+        path = self.resolve(identity_path)
+        with path.open('x') as handle:
+            json.dump({key: manifest[key] for key in V3_IDENTITY_KEYS}, handle, allow_nan=False)
+        manifest['source_files']['identity'] = {'path': str(identity_path), 'sha256': file_sha256(path)}
+        self.verify(manifest)
+        write_manifest(manifest_path, manifest)
+        return manifest
+
+    def _verify_v3(self, manifest):
+        from quant_lab.data.validation import validate_bars_v3
+        from quant_lab.data.manifest import V3_IDENTITY_KEYS
+        for entry in manifest['source_files'].values():
+            if file_sha256(self.resolve(entry['path'])) != entry['sha256']:
+                raise ValueError('Source checksum mismatch')
+        identity = manifest['source_files'].get('identity')
+        if identity is None:
+            raise ValueError('Missing frozen request identity')
+        request = json.loads(self.resolve(identity['path']).read_text())
+        if set(request) != set(V3_IDENTITY_KEYS) or any(request[key] != manifest[key] for key in V3_IDENTITY_KEYS):
+            raise ValueError('Manifest request identity mismatch')
+        frames = {name: self.read_frame(entry) for name, entry in manifest['normalized_files'].items()}
+        bars = frames['bars']
+        validate_bars_v3(bars, manifest['timeframe'])
+        if (len(bars) != manifest['rows'] or sorted(bars.symbol.unique().tolist()) != manifest['symbols']
+                or bars.timestamp.min().isoformat() != manifest['actual_start']
+                or bars.timestamp.max().isoformat() != manifest['actual_end']):
+            raise ValueError('Manifest symbol/rows/timestamp range mismatch')
+        for name, frame in frames.items():
+            if name != 'bars':
+                if name not in VALIDATORS:
+                    raise ValueError(f'Unknown normalized frame: {name}')
+                VALIDATORS[name](frame)
+        if manifest['price_data']['adjustment_available'] != ('adjustments' in frames):
+            raise ValueError('Adjustment availability mismatch')
         return frames

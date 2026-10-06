@@ -76,3 +76,9 @@ class TushareProvider:
             'Tushare corporate action event normalization is unsupported; factors do not replace event records.',
             'Instrument reference is the download-time snapshot, not historical point-in-time reference data.',
         ])
+
+
+from quant_lab.data.providers.base import ProviderCapabilities
+from quant_lab.market import AssetClass, Timeframe
+TushareProvider.capabilities = ProviderCapabilities(frozenset({AssetClass.EQUITY}),
+    frozenset({Timeframe.D1}), supports_adjustments=True, supports_calendar=True)

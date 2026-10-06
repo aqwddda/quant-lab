@@ -153,3 +153,36 @@ def validate_calendar(data):
         raise ValueError('is_open must be nonmissing bool')
     if not data.market.isin(['US', 'CN']).all():
         raise ValueError('Invalid calendar market')
+
+
+def validate_bars_v3(data, timeframe):
+    """UTC canonical observations; no exchange or asset assumptions."""
+    from quant_lab.market import Timeframe
+    Timeframe.parse(timeframe)
+    from quant_lab.data.schema import V3_BAR_COLUMNS, V3_OPTIONAL_COLUMNS
+    require_columns(data, V3_BAR_COLUMNS)
+    if data.empty:
+        raise ValueError('Nonempty bars required')
+    dates = data.timestamp
+    if not isinstance(dates.dtype, pd.DatetimeTZDtype) or str(dates.dt.tz) != 'UTC' or dates.isna().any():
+        raise ValueError('timestamp must be nonmissing timezone-aware UTC')
+    _strings(data.symbol, 'symbol')
+    _keys(data, ['timestamp', 'symbol'])
+    _numbers(data, PRICE_COLUMNS)
+    if (data[PRICE_COLUMNS] <= 0).any().any():
+        raise ValueError('OHLC must be positive')
+    if (data.high < data[['open', 'close', 'low']].max(axis=1)).any() or (data.low > data[['open', 'close', 'high']].min(axis=1)).any():
+        raise ValueError('Impossible OHLC')
+    # Missing optional fields mean unknown, not zero. Present columns are complete.
+    for column in V3_OPTIONAL_COLUMNS:
+        if column in data:
+            _numbers(data, [column])
+            if (data[column] < 0).any():
+                raise ValueError(f'{column} must be nonnegative')
+    if 'tick_volume' in data and (data.tick_volume % 1 != 0).any():
+        raise ValueError('tick_volume must be integer')
+    if 'available_at' in data:
+        if (not isinstance(data.available_at.dtype, pd.DatetimeTZDtype)
+                or str(data.available_at.dt.tz) != 'UTC' or data.available_at.isna().any()
+                or (data.available_at <= data.timestamp).any()):
+            raise ValueError('available_at must be UTC and after bar start')

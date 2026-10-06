@@ -51,6 +51,36 @@ def download_dataset(provider, market, symbol, start, end, frequency='1d', *, st
         downloaded_at_utc=datetime.now(timezone.utc).isoformat())
 
 
+
+def download_dataset_v3(provider, symbol, start, end, timeframe='1d', *, store=None,
+                        dataset_id=None, provider_instance=None, provider_options=None):
+    """New downloads publish V3; the historical V2 Python API stays compatible."""
+    from quant_lab.market import AssetClass, Timeframe
+    from quant_lab.data.normalization import daily_snapshot_v3
+    store = store or DataStore()
+    timeframe = Timeframe.parse(timeframe)
+    transport = provider_instance or get_provider(provider, **(provider_options or {}))
+    transport.capabilities.require(AssetClass.EQUITY, timeframe)
+    if transport.name != provider:
+        raise ValueError('Provider identity mismatch')
+    stamp = datetime.now(timezone.utc)
+    dataset_id = dataset_id or f'{provider}_{symbol}_{timeframe.value}_v3_{stamp:%Y%m%dT%H%M%S%fZ}'
+    safe_component(dataset_id)
+    directory = Path(store.storage['source_dir']) / provider / dataset_id
+    if store.manifest_path(dataset_id).exists() or store.resolve(directory).exists():
+        raise FileExistsError('Refusing to overwrite frozen dataset')
+    snapshot = transport.fetch_snapshot(symbol, start, end, timeframe.value)
+    sources = store.freeze_sources(dataset_id, provider, snapshot.source_frames)
+    normalized = {'yahoo': normalize_yahoo, 'tushare': normalize_tushare}[provider](snapshot.prepared, symbol)
+    zone = transport.exchange_timezone if provider == 'yahoo' else 'Asia/Shanghai'
+    bars, instruments = daily_snapshot_v3(normalized, provider=provider, session_timezone=zone)
+    return store.save_bars_v3(bars, dataset_id=dataset_id, provider=provider,
+        provider_version=snapshot.provider_version, instruments=instruments, timeframe=timeframe,
+        source_timezone=zone, session_timezone=zone, source_files=sources,
+        normalized_frames={key:value for key,value in normalized.items() if key != 'bars'},
+        assumptions=[*snapshot.assumptions,
+            'Daily timestamp is exchange-session midnight converted to UTC; it is not an intraday exchange opening timestamp.'])
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--provider', default='yahoo')
@@ -71,7 +101,9 @@ def main():
     if settings.get('enabled') is not True:
         raise ValueError(f'Provider disabled: {args.provider}')
     options = {'cache_dir': args.root / '.cache/yfinance'} if args.provider == 'yahoo' else {'token_env': settings['token_env']}
-    manifest = download_dataset(args.provider, args.market, args.symbol, args.start, args.end,
+    if args.provider not in PROVIDERS or args.market != PROVIDERS[args.provider].market:
+        raise ValueError('Provider/market mismatch')
+    manifest = download_dataset_v3(args.provider, args.symbol, args.start, args.end,
         args.frequency or config['defaults']['frequency'], store=DataStore(args.root, config['storage']),
         dataset_id=args.dataset_id, provider_options=options)
     print(json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False))

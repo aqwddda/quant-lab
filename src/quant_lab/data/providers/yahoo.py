@@ -131,3 +131,9 @@ class YahooProvider:
         with sidecar.open('x') as handle:
             json.dump(metadata, handle, indent=2, allow_nan=False)
         return metadata
+
+
+from quant_lab.data.providers.base import ProviderCapabilities
+from quant_lab.market import AssetClass, Timeframe
+YahooProvider.capabilities = ProviderCapabilities(frozenset({AssetClass.EQUITY}),
+    frozenset({Timeframe.D1}), supports_adjustments=True, supports_corporate_actions=True)
