@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 from src.data.providers.yahoo import YahooProvider, session_labels
 from src.data.normalization.yahoo import normalize_yahoo
+from src.market import Instrument, AssetClass
 
 
 class FakeYahoo:
@@ -48,6 +49,25 @@ def test_inclusive_end_timezone_and_frozen_source():
     assert normalized['bars'].volume.tolist() == [1000, 1000]
     assert normalized['adjustments'].adj_factor.tolist() == [0.49, 0.98]
     assert set(normalized['corporate_actions'].action_type) == {'dividend', 'split'}
+    assert normalized['instruments'] == [Instrument('AAPL', 'AAPL', AssetClass.EQUITY,
+        'NASDAQ', quote_currency='USD')]
+
+
+@pytest.mark.parametrize('code,venue', [('NMS', 'NASDAQ'), ('NGM', 'NASDAQ'), ('NCM', 'NASDAQ'),
+    ('NYQ', 'NYSE'), ('PCX', 'NYSE_ARCA'), ('ASE', 'NYSE_AMERICAN'), ('BATS', 'CBOE_BZX'),
+    ('PNK', 'OTC'), ('OBB', 'OTC'), ('OEM', 'OTC'), ('OQB', 'OTC'), ('OQX', 'OTC')])
+def test_supplier_exchange_maps_to_canonical_venue(code, venue):
+    snapshot = YahooProvider(client=FakeYahoo()).fetch_snapshot('AAPL', '2020-08-28', '2020-08-31')
+    snapshot.prepared['instruments']['exchange'] = code
+    assert normalize_yahoo(snapshot.prepared, 'AAPL')['instruments'] == [
+        Instrument('AAPL', 'AAPL', 'equity', venue, quote_currency='USD')]
+
+
+def test_unknown_exchange_is_rejected():
+    snapshot = YahooProvider(client=FakeYahoo()).fetch_snapshot('AAPL', '2020-08-28', '2020-08-31')
+    snapshot.prepared['instruments']['exchange'] = 'UNKNOWN'
+    with pytest.raises(ValueError, match='US exchange'):
+        normalize_yahoo(snapshot.prepared, 'AAPL')
 
 
 def test_timezone_is_required():
@@ -62,6 +82,6 @@ def test_unsupported_calendar_is_explicit():
 
 @pytest.mark.parametrize('start,end',[('20200101','2020-01-02'),('2020-01-01','20200102')])
 def test_request_dates_require_iso_format(start,end):
-    from src.data.providers.base import check_request
+    from src.data.providers._daily import check_daily_date_request
     with pytest.raises(ValueError,match='YYYY-MM-DD'):
-        check_request('AAPL',start,end)
+        check_daily_date_request('AAPL',start,end)

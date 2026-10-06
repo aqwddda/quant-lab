@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 from src.data.schema import (PRICE_COLUMNS, ADJUSTMENT_COLUMNS,
-                             ACTION_COLUMNS, INSTRUMENT_COLUMNS, CALENDAR_COLUMNS,
+                             ACTION_COLUMNS, CALENDAR_COLUMNS,
                              require_columns)
 
 
@@ -87,25 +87,6 @@ def validate_corporate_actions(data):
         raise ValueError('Invalid dividend')
     if (data.loc[split, 'split_ratio'] <= 0).any() or (data.loc[split, 'cash_amount'] != 0).any():
         raise ValueError('Invalid split')
-
-
-def validate_instruments(data):
-    require_columns(data, INSTRUMENT_COLUMNS)
-    if data.empty:
-        raise ValueError('Nonempty instruments required')
-    for column in ['symbol', 'market', 'asset_type', 'provider']:
-        _strings(data[column], column)
-    if data.symbol.duplicated().any() or not data.market.isin(['US', 'CN']).all():
-        raise ValueError('Invalid instrument keys/market')
-    for column in ['list_date', 'delist_date']:
-        if not pd.api.types.is_datetime64_ns_dtype(data[column].dtype) or data[column].dt.tz is not None:
-            raise ValueError(f'{column} must be timezone-naive datetime64[ns]')
-        dates = data[column].dropna()
-        if not dates.eq(dates.dt.normalize()).all():
-            raise ValueError(f'{column} must be a session date')
-    known = data.list_date.notna() & data.delist_date.notna()
-    if (data.loc[known, 'delist_date'] < data.loc[known, 'list_date']).any():
-        raise ValueError('delist_date precedes list_date')
 
 
 def validate_calendar(data):

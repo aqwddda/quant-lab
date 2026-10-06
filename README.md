@@ -37,7 +37,8 @@ python -m pytest -q
 
 只支持 `schema_version=3` 的 Manifest。Canonical bars 必需字段：`timestamp, symbol, open, high, low, close`。timestamp 必须 UTC aware、语义为 bar_start。
 可选 `volume, tick_volume, amount, open_interest`；缺少代表未知，不补零。支持 1m、5m、15m、30m、1h、4h、1d。
-Instrument 区分 `asset_class, venue, symbol, provider_symbol`；资产类别包括 equity、forex、futures。期货数据/元信息可存储，期货执行账户未实现。
+`src.market.Instrument` 是唯一 canonical Instrument，区分 `asset_class, venue, symbol, provider_symbol`，支持 currency、tick_size、lot_size、contract_multiplier、expiry 等元信息；资产类别包括 equity、forex、futures。期货数据/元信息可存储，期货执行账户未实现。
+Yahoo/Tushare 原始证券信息先冻结到 Source Snapshot，归一化直接生成 `list[Instrument]`，正式字段只保存在 `manifest["instruments"]`，不再保存 normalized instrument parquet。Local 使用研究者显式提供的同一 Instrument。
 
 ```text
 Provider → Source Snapshot → Normalization → Validation
@@ -69,7 +70,8 @@ python scripts/download_data.py --provider local --input /path/to/EURUSD.csv \
   --frequency 15m --source-timezone UTC --timestamp-semantics bar_start
 ```
 
-Yahoo/Tushare 如实声明 equity daily 能力。SDK 仅供下载流程使用；Tushare token 只读环境变量。
+Yahoo/Tushare 只声明 `AssetClass.EQUITY + Timeframe.D1` 能力；日期请求检查由 `src/data/providers/_daily.py` 的 `check_daily_date_request` 负责。通用 Provider Base 只保留能力声明和协议。SDK 仅供下载流程使用；Tushare token 只读环境变量。
+LocalBarProvider 显式导入 equity、forex、futures 的 1m、5m、15m、30m、1h、4h、1d 数据，使用调用者声明的 Instrument、时区和时间语义。
 Yahoo OHLC 本身有拆股调整，使用冻结的全部后续 split 显式反向还原 raw OHLC/volume/dividend。Tushare vol 手×100→股、amount 千元×1000→CNY。
 Daily supplier session 标签在 normalization 内转为 UTC 午夜坐标，并保留 date 作为辅助因子键；午夜不是实际交易所开盘时刻，不能据此推导分钟线 session schedule。
 

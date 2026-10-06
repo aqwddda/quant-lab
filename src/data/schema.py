@@ -5,8 +5,6 @@ OPTIONAL_BAR_COLUMNS = ['volume', 'tick_volume', 'amount', 'open_interest']
 PRICE_COLUMNS = ['open', 'high', 'low', 'close']
 ADJUSTMENT_COLUMNS = ['date', 'symbol', 'adj_factor', 'provider', 'factor_semantics']
 ACTION_COLUMNS = ['date', 'symbol', 'action_type', 'cash_amount', 'split_ratio', 'provider']
-INSTRUMENT_COLUMNS = ['symbol', 'name', 'market', 'exchange', 'asset_type', 'currency',
-                      'list_date', 'delist_date', 'provider']
 CALENDAR_COLUMNS = ['market', 'date', 'is_open', 'provider']
 PRICE_BASES = {'raw', 'provider_adjusted', 'qfq', 'hfq'}
 

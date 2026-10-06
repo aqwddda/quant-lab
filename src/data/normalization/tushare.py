@@ -1,7 +1,7 @@
 """Explicit supplier -> canonical conversion. Sorting happens only at this boundary."""
 import pandas as pd
-from src.data.schema import (INSTRUMENT_COLUMNS,
-                             CALENDAR_COLUMNS, require_columns)
+from src.data.schema import CALENDAR_COLUMNS, require_columns
+from src.market import Instrument, AssetClass
 from src.data.validation import _validate_daily_prices, validate_adjustments
 
 
@@ -35,14 +35,16 @@ def normalize_tushare(prepared, symbol):
     if matching.adj_factor.isna().any():
         raise ValueError('Missing adjustment factor for bar date')
     reference = prepared['instruments']
-    require_columns(reference, ['ts_code', 'name', 'exchange', 'list_date', 'delist_date'])
+    require_columns(reference, ['ts_code', 'exchange'])
     if len(reference) != 1 or reference.ts_code.iloc[0] != symbol:
         raise ValueError('Tushare instrument symbol mismatch')
     item = reference.iloc[0]
-    instrument = pd.DataFrame([[symbol, item['name'], 'CN', item.exchange, 'EQUITY', 'CNY',
-        item.list_date, item.delist_date, 'tushare']], columns=INSTRUMENT_COLUMNS)
-    for column in ['list_date', 'delist_date']:
-        instrument[column] = pd.to_datetime(instrument[column].replace('', None), format='%Y%m%d').astype('datetime64[ns]')
+    # Tushare codes coincide with canonical venue names, through an explicit mapping.
+    venues = {'SZSE': 'SZSE', 'SSE': 'SSE', 'BSE': 'BSE'}
+    if item.exchange not in venues:
+        raise ValueError('Unsupported Tushare exchange')
+    instrument = Instrument(symbol=symbol, provider_symbol=item.ts_code,
+        asset_class=AssetClass.EQUITY, venue=venues[item.exchange], quote_currency='CNY')
     source_calendar = prepared['calendar']
     require_columns(source_calendar, ['cal_date', 'is_open'])
     if not source_calendar.is_open.isin([0, 1]).all():
@@ -51,4 +53,4 @@ def normalize_tushare(prepared, symbol):
                             'market': 'CN', 'is_open': source_calendar.is_open.astype(bool), 'provider': 'tushare'})
     calendar = canonical_order(calendar, ['date', 'market'])[CALENDAR_COLUMNS]
     bars = normalize_session_bars(bars, 'Asia/Shanghai')
-    return {'bars': bars, 'adjustments': adjustments, 'instruments': instrument, 'calendar': calendar}
+    return {'bars': bars, 'adjustments': adjustments, 'instruments': [instrument], 'calendar': calendar}

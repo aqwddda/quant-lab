@@ -33,9 +33,3 @@ def normalize_session_bars(bars, session_timezone):
         nonexistent='raise').dt.tz_convert('UTC')
     validate_bars(bars, '1d')
     return bars
-
-
-def instruments_from_reference(reference):
-    from src.market import Instrument, AssetClass
-    return [Instrument(row.symbol, row.symbol, AssetClass.EQUITY, row.exchange,
-        quote_currency=row.currency) for row in reference.itertuples()]

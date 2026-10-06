@@ -23,10 +23,10 @@ flowchart TD
 
 | 模块 | 职责 |
 | --- | --- |
-| `src/market/` | AssetClass、Timeframe、Bar、Instrument；不依赖供应商或交易 |
+| `src/market/` | AssetClass、Timeframe、Bar、唯一 canonical Instrument；不依赖供应商或交易 |
 | `src/data/providers/` | 供应商通信/本地文件，声明能力；SDK lazy import |
 | `src/data/normalization/` | 时间、字段、单位、拆股反向还原；daily date 是来源辅助键 |
-| `src/data/validation.py` | 当前 Canonical Schema、因子、动作、引用表校验 |
+| `src/data/validation.py` | 当前 Canonical Bars、因子、公司行动、日历校验 |
 | `src/data/manifest.py` / `store.py` | schema_version=3、身份、不可变保存、内容 SHA |
 | `src/data/loader.py` | 显式版本读取、筛选、DataFrame→Bar |
 | `src/data/resample.py` | 显式时区/anchor、完整聚合窗口、父版本 lineage |
@@ -45,6 +45,16 @@ Canonical Bar 必需 UTC timestamp、symbol、OHLC；可选 volume/tick_volume/a
 Yahoo/Tushare 当前只供应 equity daily，daily session 午夜转 UTC 的假设写入 Manifest。Local 使用调用者指定的 source_timezone 与 bar_start/bar_end，aware offset 必须与声明一致。
 Loader 明确 dataset ID，核验完整文件后才筛选；同一个版本可包含同一 asset_class/venue 的多标的，不代表多资产账户已实现。
 原文件字节、响应表、request 元数据均可冻结；Manifest 由自身 SHA sidecar 保护，identity 独立冻结。
+
+### Instrument 与 Provider 边界
+
+`src.market.Instrument` 是唯一正式证券模型。Yahoo 的 `get_info()` 字典与 Tushare 的 `stock_basic` 响应表作为供应商原始 metadata 冻结；normalization 直接构造 `list[Instrument]`，下载入口将其交给 DataStore。正式字段保存在 `manifest["instruments"]`，并通过 `Instrument(**item)` 验证；不再维护 normalized instrument 表。
+
+Yahoo exchange code 显式映射到 canonical venue：NMS/NGM/NCM→NASDAQ、NYQ→NYSE、PCX→NYSE_ARCA、ASE→NYSE_AMERICAN、BATS→CBOE_BZX，支持的 OTC code 归为 OTC。上市分层信息保留在 Source Snapshot。Tushare 通过显式映射得到 SZSE/SSE/BSE；未支持的 exchange 报错。供应商名称、上市/退市日期等信息留在 Source，不增加通用 Instrument 字段。
+
+LocalBarProvider 接收研究者显式提供的同一 Instrument，冻结请求与原文件，通过其 symbol/provider_symbol 对齐 canonical bars；支持 equity/forex/futures 与 1m/5m/15m/30m/1h/4h/1d。
+
+Provider Base 只包含 `ProviderCapabilities` 与 `BarProvider` 协议。Yahoo/Tushare 仍只声明 Equity + D1，日线日期检查在 `providers/_daily.py:check_daily_date_request`。Local 不依赖这一辅助模块，也不采用 US/CN 或 date-only 请求限制。
 
 ## 价格与窗口
 

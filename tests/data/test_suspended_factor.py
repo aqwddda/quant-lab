@@ -1,4 +1,3 @@
-from src.data.normalization import instruments_from_reference
 import pandas as pd
 import pytest
 import tushare
@@ -20,8 +19,8 @@ def test_qfq_end_factor_on_session_without_bar(monkeypatch, store):
     frames = normalize_tushare(snapshot.prepared, '000001.SZ')
     assert len(frames['adjustments']) == 3 and len(frames['bars']) == 2
     store.save_dataset(frames['bars'],dataset_id='suspended_factor',provider='tushare',provider_version='fixture',
-        instruments=instruments_from_reference(frames['instruments']),timeframe='1d',source_timezone='Asia/Shanghai',
-        session_timezone='Asia/Shanghai',normalized_frames={k:v for k,v in frames.items() if k!='bars'},
+        instruments=frames['instruments'],timeframe='1d',source_timezone='Asia/Shanghai',
+        session_timezone='Asia/Shanghai',normalized_frames={k:v for k,v in frames.items() if k not in {'bars', 'instruments'}},
         source_frames=snapshot.source_frames)
     loaded=load_dataset('suspended_factor',end='2020-01-06T23:59:59+08:00',price_basis='qfq',store=store)
     assert loaded.close.tolist() == [25., 25.]

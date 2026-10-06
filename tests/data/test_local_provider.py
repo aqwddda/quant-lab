@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 import pandas as pd
 import pytest
-from src.market import Instrument, AssetClass
+from src.market import Instrument, AssetClass, Timeframe
 from src.data.store import DataStore
 from src.data.loader import load_dataset
 from scripts.download_data import import_local_dataset
@@ -57,3 +57,48 @@ def test_aware_source_offsets_match_declared_zone(tmp_path):
         import_local_dataset(path,instrument=Instrument('EURUSD','EURUSD','forex','fixture'),
             timeframe='1m',source_timezone='UTC',timestamp_semantics='bar_start',
             store=DataStore(tmp_path/'store'),dataset_id='wrong_zone')
+
+
+@pytest.mark.parametrize('timeframe', list(Timeframe))
+@pytest.mark.parametrize('instrument', [
+    Instrument('AAPL', 'AAPL.vendor', AssetClass.EQUITY, 'NASDAQ',
+        quote_currency='USD', tick_size=.01, lot_size=1),
+    Instrument('EURUSD', 'EURUSD.a', AssetClass.FOREX, 'broker_x',
+        base_currency='EUR', quote_currency='USD', tick_size=.00001,
+        lot_size=100000, contract_multiplier=100000),
+    Instrument('ESZ26', 'ESZ6', AssetClass.FUTURES, 'CME',
+        quote_currency='USD', tick_size=.25, lot_size=1,
+        contract_multiplier=50, expiry='2026-12-18'),
+])
+def test_all_assets_and_timeframes_preserve_canonical_instrument(tmp_path, instrument, timeframe):
+    from dataclasses import asdict, fields, FrozenInstanceError
+    import json
+    from src.data.providers.local import LocalBarProvider
+    LocalBarProvider.capabilities.require(instrument.asset_class, timeframe)
+    path = tmp_path / 'bars.csv'
+    source = pd.DataFrame({'timestamp': pd.date_range('2020-01-01', periods=3, freq=timeframe.duration),
+        'symbol': [instrument.provider_symbol]*3,
+        'open': [10.]*3, 'high': [11.]*3, 'low': [9.]*3, 'close': [10.5]*3})
+    source.to_csv(path, index=False)
+    store = DataStore(tmp_path / 'store')
+    manifest = import_local_dataset(path, instrument=instrument, timeframe=timeframe,
+        source_timezone='UTC', timestamp_semantics='bar_start', store=store, dataset_id='snapshot')
+    published = store.load_manifest('snapshot')
+    metadata = published['instruments'][0]
+    assert set(metadata) == {field.name for field in fields(Instrument)} == {
+        'symbol', 'provider_symbol', 'asset_class', 'venue', 'base_currency', 'quote_currency',
+        'tick_size', 'lot_size', 'contract_multiplier', 'expiry'}
+    assert metadata == {**asdict(instrument), 'asset_class': instrument.asset_class.value}
+    assert Instrument(**metadata) == instrument
+    assert instrument.provider_symbol != instrument.symbol
+    with pytest.raises(FrozenInstanceError):
+        instrument.venue = 'changed'
+    request = json.loads(store.resolve(manifest['source_files']['request']['path']).read_text())
+    assert request['instrument'] == metadata
+    assert manifest['timeframe'] == timeframe.value
+    assert set(manifest['normalized_files']) == {'bars'}
+    assert not store.resolve('data/normalized/instruments').exists()
+    loaded = load_dataset('snapshot', store=store)
+    assert loaded.symbol.eq(instrument.symbol).all()
+    assert loaded.timestamp.diff().dropna().eq(timeframe.duration).all()
+    assert store.resolve(manifest['source_files']['original']['path']).read_bytes() == path.read_bytes()

@@ -1,4 +1,3 @@
-from src.data.normalization import instruments_from_reference
 import pandas as pd
 import pytest
 import tushare
@@ -70,8 +69,8 @@ def test_against_actual_tushare_pro_bar_sdk_offline(monkeypatch, method):
 def test_qfq_anchor_uses_requested_end_not_future_dataset_end(monkeypatch, store):
     _, snapshot, frames = split_fixture(monkeypatch)
     store.save_dataset(frames['bars'],dataset_id='tushare_anchor',provider='tushare',provider_version='fixture',
-        instruments=instruments_from_reference(frames['instruments']),timeframe='1d',source_timezone='Asia/Shanghai',
-        session_timezone='Asia/Shanghai',normalized_frames={k:v for k,v in frames.items() if k!='bars'},
+        instruments=frames['instruments'],timeframe='1d',source_timezone='Asia/Shanghai',
+        session_timezone='Asia/Shanghai',normalized_frames={k:v for k,v in frames.items() if k not in {'bars', 'instruments'}},
         source_frames=snapshot.source_frames)
     loaded=load_dataset('tushare_anchor',end='2020-01-02T23:59:59+08:00',price_basis='qfq',store=store)
     assert loaded.close.tolist() == [100.]

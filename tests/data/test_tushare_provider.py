@@ -1,8 +1,8 @@
-from src.data.normalization import instruments_from_reference
 import pandas as pd
 import pytest
 from src.data.providers.tushare import TushareProvider
 from src.data.normalization.tushare import normalize_tushare
+from src.market import Instrument, AssetClass
 
 
 class FakeTushare:
@@ -55,12 +55,32 @@ def test_source_normalization_units_calendar_and_store(monkeypatch, store, symbo
     assert normalized['bars'].date.dt.strftime('%Y%m%d').tolist() == ['20200102', '20200103']
     assert normalized['bars'].volume.tolist() == [2050, 1025]
     assert normalized['bars'].amount.tolist() == [20500., 5125.]
+    assert normalized['instruments'] == [Instrument(symbol, symbol, AssetClass.EQUITY,
+        'SZSE' if symbol.endswith('.SZ') else 'SSE', quote_currency='CNY')]
     manifest = store.save_dataset(normalized['bars'], dataset_id=f'tushare_{symbol}_snapshot',
         provider='tushare',provider_version=snapshot.provider_version,source_timezone='Asia/Shanghai',
-        session_timezone='Asia/Shanghai',timeframe='1d',instruments=instruments_from_reference(normalized['instruments']),
-        normalized_frames={k:v for k,v in normalized.items() if k!='bars'},
+        session_timezone='Asia/Shanghai',timeframe='1d',instruments=normalized['instruments'],
+        normalized_frames={k:v for k,v in normalized.items() if k not in {'bars', 'instruments'}},
         source_frames=snapshot.source_frames,assumptions=snapshot.assumptions)
     assert store.verify(manifest)['bars'].symbol.eq(symbol).all()
+
+
+@pytest.mark.parametrize('symbol,code,venue', [('000001.SZ', 'SZSE', 'SZSE'),
+    ('600519.SH', 'SSE', 'SSE'), ('430047.BJ', 'BSE', 'BSE')])
+def test_supplier_exchange_maps_to_canonical_venue(monkeypatch, symbol, code, venue):
+    monkeypatch.setenv('TUSHARE_TOKEN', 'fixture-token')
+    snapshot = TushareProvider(client=FakeTushare(symbol)).fetch_snapshot(symbol, '2020-01-02', '2020-01-03')
+    snapshot.prepared['instruments']['exchange'] = code
+    assert normalize_tushare(snapshot.prepared, symbol)['instruments'] == [
+        Instrument(symbol, symbol, 'equity', venue, quote_currency='CNY')]
+
+
+def test_unknown_exchange_is_rejected(monkeypatch):
+    monkeypatch.setenv('TUSHARE_TOKEN', 'fixture-token')
+    snapshot = TushareProvider(client=FakeTushare()).fetch_snapshot('000001.SZ', '2020-01-02', '2020-01-03')
+    snapshot.prepared['instruments']['exchange'] = 'UNKNOWN'
+    with pytest.raises(ValueError, match='Unsupported Tushare exchange'):
+        normalize_tushare(snapshot.prepared, '000001.SZ')
 
 
 def test_unsupported_actions_are_explicit(monkeypatch):

@@ -3,7 +3,7 @@ import os
 import re
 import pandas as pd
 from src.data.models import ProviderSnapshot
-from src.data.providers.base import check_request
+from src.data.providers._daily import check_daily_date_request
 
 
 class TushareProvider:
@@ -24,7 +24,7 @@ class TushareProvider:
         self.exchange = 'SSE'
 
     def _parameters(self, symbol, start, end, frequency='1d'):
-        check_request(symbol, start, end, frequency)
+        check_daily_date_request(symbol, start, end, frequency)
         if not re.fullmatch(r'\d{6}\.(SZ|SH|BJ)', symbol):
             raise ValueError('Tushare requires canonical A-share symbol, e.g. 000001.SZ')
         self.exchange = {'SH': 'SSE', 'SZ': 'SZSE', 'BJ': 'BSE'}[symbol[-2:]]
@@ -56,7 +56,7 @@ class TushareProvider:
         raise ValueError('Tushare returned no instrument data')
 
     def fetch_calendar(self, start, end):
-        check_request('calendar', start, end)
+        check_daily_date_request('calendar', start, end)
         return self._capture('calendar', self.api.trade_cal(exchange=self.exchange,
             start_date=start.replace('-', ''), end_date=end.replace('-', ''),
             fields='exchange,cal_date,is_open'))

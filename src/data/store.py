@@ -7,14 +7,14 @@ import yaml
 from src.data.manifest import (file_sha256, safe_component, read_manifest,
                                write_manifest, validate_manifest)
 from src.data.validation import (validate_adjustments,
-                                 validate_corporate_actions, validate_instruments,
+                                 validate_corporate_actions,
                                  validate_calendar)
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STORAGE = {'source_dir': 'data/source', 'normalized_dir': 'data/normalized',
                    'reference_dir': 'data/reference', 'manifest_dir': 'data/manifests'}
 VALIDATORS = {'adjustments': validate_adjustments, 'corporate_actions': validate_corporate_actions,
-              'instruments': validate_instruments, 'calendar': validate_calendar}
+              'calendar': validate_calendar}
 
 
 class DataStore:
@@ -117,6 +117,12 @@ class DataStore:
         label = item.symbol if len(symbols) == 1 else 'multi'
         for value in (item.venue, label):
             safe_component(value)
+        frames = dict(normalized_frames or {})
+        if 'bars' in frames:
+            raise ValueError('bars is a reserved normalized name')
+        unknown = set(frames) - VALIDATORS.keys()
+        if unknown:
+            raise ValueError(f'Unknown normalized frames: {sorted(unknown)}')
         source_dir = Path(self.storage['source_dir']) / provider / dataset_id
         manifest_path = self.manifest_path(dataset_id)
         if manifest_path.exists() or manifest_path.with_suffix('.json.sha256').exists():
@@ -132,9 +138,6 @@ class DataStore:
                 raise ValueError('Source identity/path/checksum mismatch')
         if self.resolve(source_dir / 'identity.json').exists():
             raise FileExistsError('Refusing to overwrite frozen identity')
-        frames = dict(normalized_frames or {})
-        if 'bars' in frames:
-            raise ValueError('bars is a reserved normalized name')
         frames = {'bars': bars, **frames}
         normalized = {}
         for name, frame in frames.items():
@@ -194,8 +197,6 @@ class DataStore:
                     raise ValueError('Manifest provider mismatch')
                 if 'symbol' in frame and not frame.symbol.isin(manifest['symbols']).all():
                     raise ValueError('Manifest reference symbol mismatch')
-        if 'instruments' in frames and sorted(frames['instruments'].symbol) != manifest['symbols']:
-            raise ValueError('Manifest instrument symbol mismatch')
         if 'adjustments' in frames:
             if 'date' not in bars:
                 raise ValueError('Equity adjustments require explicit session keys')

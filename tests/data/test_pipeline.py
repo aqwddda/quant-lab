@@ -8,6 +8,7 @@ from scripts.download_data import download_dataset
 from src.data.providers.yahoo import YahooProvider
 from src.data.providers.tushare import TushareProvider
 from src.data.loader import load_dataset
+from src.market import Instrument, AssetClass
 from tests.data.test_yahoo_provider import FakeYahoo
 from tests.data.test_tushare_provider import FakeTushare
 
@@ -31,6 +32,23 @@ def test_four_symbol_download_freeze_verify_load(monkeypatch, store, provider, m
     assert len(data) == 2 and data.symbol.eq(symbol).all()
     source = pd.read_parquet(store.resolve(manifest['source_files']['bars']['path']))
     pd.testing.assert_frame_equal(source, transport.source_frames['bars'])
+    entry = manifest['source_files']['instruments']
+    if provider == 'yahoo':
+        metadata = json.loads(store.resolve(entry['path']).read_text())
+        assert metadata == transport.source_frames['instruments']
+        assert metadata['longName'] == 'Apple Inc.'
+        assert metadata['exchange'] == 'NMS'
+        expected = Instrument(symbol, symbol, AssetClass.EQUITY, 'NASDAQ', quote_currency='USD')
+    else:
+        metadata = pd.read_parquet(store.resolve(entry['path']))
+        pd.testing.assert_frame_equal(metadata, transport.source_frames['instruments'])
+        assert metadata.list_date.iloc[0] == '19910403'
+        assert metadata['name'].iloc[0] == 'fixture'
+        expected = Instrument(symbol, symbol, AssetClass.EQUITY,
+            'SZSE' if symbol.endswith('.SZ') else 'SSE', quote_currency='CNY')
+    assert [Instrument(**item) for item in manifest['instruments']] == [expected]
+    assert 'instruments' not in manifest['normalized_files']
+    assert not store.resolve('data/normalized/instruments').exists()
     with pytest.raises(FileExistsError):
         download_dataset(provider, symbol, start, end, store=store,
                            dataset_id=manifest['dataset_id'], provider_instance=transport)

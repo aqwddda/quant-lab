@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pandas as pd
 from src.data.models import ProviderSnapshot
-from src.data.providers.base import check_request
+from src.data.providers._daily import check_daily_date_request
 
 
 def session_labels(index, exchange_timezone):
@@ -29,7 +29,7 @@ class YahooProvider:
         self._request = None
 
     def fetch_bars(self, symbol, start, end, frequency='1d'):
-        _, last = check_request(symbol, start, end, frequency)
+        _, last = check_daily_date_request(symbol, start, end, frequency)
         self.ticker = self.client.Ticker(symbol)
         history = self.ticker.history(start=start, end=(last + timedelta(days=1)).isoformat(),
                                       interval='1d', auto_adjust=False, back_adjust=False,

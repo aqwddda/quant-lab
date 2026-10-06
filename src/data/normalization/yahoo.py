@@ -1,7 +1,8 @@
 """Explicit supplier -> canonical conversion. Sorting happens only at this boundary."""
 import numpy as np
 import pandas as pd
-from src.data.schema import (PRICE_COLUMNS, ACTION_COLUMNS, INSTRUMENT_COLUMNS,
+from src.market import Instrument, AssetClass
+from src.data.schema import (PRICE_COLUMNS, ACTION_COLUMNS,
                              require_columns)
 from src.data.validation import _validate_daily_prices, validate_adjustments
 
@@ -54,15 +55,16 @@ def normalize_yahoo(prepared, symbol):
     info = prepared['instruments']
     if info.get('symbol') != symbol or info.get('quoteType') not in {'ETF', 'EQUITY'}:
         raise ValueError('Yahoo instrument must match symbol and be ETF/EQUITY')
-    us_exchanges = {'NMS', 'NGM', 'NCM', 'NYQ', 'PCX', 'ASE', 'BATS', 'PNK', 'OBB', 'OEM', 'OQB', 'OQX'}
-    if info.get('exchange') not in us_exchanges or info.get('currency') != 'USD':
+    # Canonical venues group listing tiers; supplier codes remain in Source Snapshot.
+    venues = {'NMS': 'NASDAQ', 'NGM': 'NASDAQ', 'NCM': 'NASDAQ',
+              'NYQ': 'NYSE', 'PCX': 'NYSE_ARCA', 'ASE': 'NYSE_AMERICAN',
+              'BATS': 'CBOE_BZX', 'PNK': 'OTC', 'OBB': 'OTC', 'OEM': 'OTC',
+              'OQB': 'OTC', 'OQX': 'OTC'}
+    if info.get('exchange') not in venues or info.get('currency') != 'USD':
         raise ValueError('Yahoo US normalization requires a supported US exchange and USD currency')
-    instrument = pd.DataFrame([[symbol, info.get('longName') or info.get('shortName'), 'US',
-        info.get('exchange'), info['quoteType'], info.get('currency'), pd.NaT, pd.NaT, 'yahoo']],
-        columns=INSTRUMENT_COLUMNS)
-    for column in ['list_date', 'delist_date']:
-        instrument[column] = pd.to_datetime(instrument[column]).astype('datetime64[ns]')
+    instrument = Instrument(symbol=symbol, provider_symbol=info['symbol'],
+        asset_class=AssetClass.EQUITY, venue=venues[info['exchange']], quote_currency=info['currency'])
     bars = normalize_session_bars(bars, prepared['source_timezone'])
-    return {'bars': bars, 'adjustments': adjustments, 'corporate_actions': actions, 'instruments': instrument}
+    return {'bars': bars, 'adjustments': adjustments, 'corporate_actions': actions, 'instruments': [instrument]}
 
 

@@ -257,6 +257,16 @@ Data supports current UTC bars, local Forex snapshots, multi-symbol reads,
 provider snapshot normalization, immutable manifests and anchored resampling.
 Daily supplier session dates may remain auxiliary adjustment/calendar keys;
 canonical bars always include UTC timestamp and explicit timeframe semantics.
+src.market.Instrument is the only canonical Instrument model. Yahoo/Tushare
+normalization constructs it directly after raw supplier metadata is frozen.
+Canonical instrument metadata lives in manifest["instruments"] and is validated
+with Instrument(**item); do not add a second instrument table or schema.
+Supplier name, listing/delisting dates and exchange codes remain source metadata.
+Provider Base contains only generic capabilities and the BarProvider protocol.
+Yahoo/Tushare remain Equity + D1; date-only request checks belong to
+src/data/providers/_daily.py:check_daily_date_request.
+LocalBarProvider explicitly imports Equity/Forex/Futures at 1m/5m/15m/30m/1h/4h/1d
+using caller-supplied Instrument, timezone and timestamp semantics.
 Chan-Core implements inclusion, strict fractals and strokes incrementally;
 confirmed structures must never be rewritten. Undefined theory remains documented
 as provisional defaults or explicit errors.

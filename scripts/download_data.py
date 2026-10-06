@@ -15,14 +15,12 @@ from src.data.manifest import safe_component
 from src.data.normalization.yahoo import normalize_yahoo
 from src.data.normalization.tushare import normalize_tushare
 from src.data.providers import get_provider, PROVIDERS
-from src.data.providers.base import check_request
 
 
 def download_dataset(provider, symbol, start, end, timeframe='1d', *, store=None,
                         dataset_id=None, provider_instance=None, provider_options=None):
     """Freeze supplier snapshots and publish the current canonical schema."""
     from src.market import AssetClass, Timeframe
-    from src.data.normalization import instruments_from_reference
     store = store or DataStore()
     timeframe = Timeframe.parse(timeframe)
     transport = provider_instance or get_provider(provider, **(provider_options or {}))
@@ -41,11 +39,11 @@ def download_dataset(provider, symbol, start, end, timeframe='1d', *, store=None
     normalized = {'yahoo': normalize_yahoo, 'tushare': normalize_tushare}[provider](snapshot.prepared, symbol)
     zone = transport.exchange_timezone if provider == 'yahoo' else 'Asia/Shanghai'
     bars = normalized['bars']
-    instruments = instruments_from_reference(normalized['instruments'])
+    instruments = normalized['instruments']
     return store.save_dataset(bars, dataset_id=dataset_id, provider=provider,
         provider_version=snapshot.provider_version, instruments=instruments, timeframe=timeframe,
         source_timezone=zone, session_timezone=zone, source_files=sources,
-        normalized_frames={key:value for key,value in normalized.items() if key != 'bars'},
+        normalized_frames={key:value for key,value in normalized.items() if key not in {'bars', 'instruments'}},
         assumptions=[*snapshot.assumptions,
             'Daily timestamp is exchange-session midnight converted to UTC; it is not an intraday exchange opening timestamp.'])
 
