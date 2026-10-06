@@ -1,153 +1,167 @@
-# Quant Lab：可审计的日线研究基础工程
+# Quant Lab：可审计的市场数据与结构研究
 
-当前数据层支持 US/CN 多标的数据管理；交易引擎仍是单资产日线 SMA20/SMA60、long/cash、T 收盘信号、T+1 开盘成交。执行和记账不建模完整 A 股规则；A 股回测仅用于数据链路 smoke test。
+当前支持 V1/V2 冻结日线兼容读取、V3 多资产类别/周期数据、本地 Forex 文件导入、锚定重采样、增量 Chan 包含/分型/笔，以及策略接口驱动的单标的 Equity 回测。
+默认实验仍是原冻结 SPY SMA20/60，T 收盘信号、T+1 开盘成交。Chan-FX 只有结构观察，Forex 执行与最终买卖规则未实现。
 
-熟悉 Python 但刚接触量化研究的读者，可阅读 [项目教程](docs/项目教程.md)。该教程讲解 V1 SPY 实验；V2 数据架构以本文和 [实施方案](docs/Quant%20Lab%20Data%20Layer%20V2%20Implementation%20Plan.md) 为准。
+- [架构与数据/时钟边界](docs/architecture.md)
+- [Chan-Core 规则、确认状态与待确认清单](docs/chan-core.md)
+- [本轮实施方案](docs/Quant%20Lab%20下一阶段重构与%20Chan-Core%20自研实施方案.md)
+- [本轮验收记录](docs/重构与Chan-Core验收记录.md)
+- [V2 数据语义与历史验收](docs/数据层V2开发与验收记录.md)
+- [项目教程](docs/项目教程.md)：V1 实验教学；旧 `src.*` 调用兼容，当前代码位置以架构文档为准。
 
-## 环境与默认实验
+## 环境
 
 ```bash
 conda activate quant-lab
 python --version  # Python 3.11
 python -m pip install -r requirements-lock.txt
+python -m pip install -e . --no-deps --no-build-isolation
 python -m pytest -q
 python scripts/run_backtest.py
 ```
 
-使用已有 Conda 环境。`requirements.txt` 是直接依赖范围；lock 文件记录实际安装版本及项目依赖闭包，未加入 notebook 等无关环境包。
+使用已有 Conda 环境，不创建额外虚拟环境。脚本不做路径注入；editable 安装后可从其它工作目录执行脚本。
+新增结构与数据功能使用已有依赖，不需要第三方 Chan 库或联网 FX SDK。
 
-默认配置继续使用原来的 `data/raw/spy_daily.parquet` 和 `.metadata.json`，价格口径为 `legacy_provider_adjusted`。文件 SHA-256 必须为 `bdd34d3bc950d433a5eeeaa594be558dd1c920dacbd61f8750366d8836bca19f`；预期 2766 行、45 次策略成交、1 次 benchmark 成交。该冻结文件不分发到 Git，当前重新下载的数据不能代替它复现历史实验。
+## 默认冻结回归
 
-所有脚本均可从其他工作目录运行，默认配置路径相对项目根目录。下载与回测严格分离。
+`data/raw/spy_daily.parquet` SHA-256：`bdd34d3bc950d433a5eeeaa594be558dd1c920dacbd61f8750366d8836bca19f`。
+2766 行，2015-01-02..2025-12-31；45 次策略成交、1 次 benchmark 成交。
+策略总收益 1.466718879583301、CAGR 0.08558235360852229；benchmark 总收益 2.9389675730204616、CAGR 0.13278961489741126。
+该冻结文件不分发到 Git，重新下载不能替代原回归数据。缺少文件时对应测试明确 skip，不能据此声称完成真实 SPY 验收。
 
-## Data Architecture
+默认配置：
 
-```text
-Yahoo / Tushare Provider
-  → Immutable Source Snapshot
-  → Explicit Normalization
-  → Canonical Schema / Validation
-  → Frozen Store + Checksummed Manifest
-  → Local Loader
-  → Strategy / Backtest
+```yaml
+strategy:
+  name: sma_cross
+  params:
+    fast_window: 20
+    slow_window: 60
+
+data:
+  symbol: SPY
+  asset_class: equity
+  timeframe: 1d
+  price_basis: legacy_provider_adjusted
+  market: US
 ```
 
-| 路径 | 职责 |
-| --- | --- |
-| `src/data/providers/` | 外部供应商通信、Yahoo exchange timezone 转换；可选能力不支持时明确报错 |
-| `src/data/normalize.py` | 字段映射、明确单位转换、供应商倒序数据的显式排序 |
-| `src/data/adjustment.py` | 从 raw OHLC 和 exact-date factor 构造研究价格，不补缺失因子 |
-| `src/data/validation.py` | schema、数据质量、市场 weekday/calendar 检查 |
-| `src/data/store.py` | 本地保存、定位、加载、SHA；不联网 |
-| `src/data/manifest.py` | provenance、版本、JSON manifest 和自身校验 |
-| `src/data/loader.py` | 校验完整冻结数据后筛选日期/标的，返回 long format |
-| `src/data_loader.py` | V1 compatibility wrapper，共用新 Loader 的读取实现 |
-| `src/strategy.py` | 仅计算历史收盘均线和仓位目标 |
-| `src/execution.py` / `src/portfolio.py` | 成交时序/成本与现金/持仓/损益 |
-| `src/backtest.py` / `src/metrics.py` | 按日驱动单资产账户与完成后的绩效计算 |
-| `src/validation.py` | Future Mutation Test 与策略因果性检查 |
+历史 flat strategy YAML 继续兼容。backtest.yaml 管资金、成本、区间和输出，data.yaml 管存储与供应商启用，不存 token。
+
+## 数据流程与版本
+
+```text
+Provider → Source Snapshot → Normalization → Validation
+         → Frozen Store / Manifest / SHA → Local Loader → Bar
+         → Structure / Strategy → Orders → Execution → Portfolio → Metrics
+```
+
+V1 `data/raw/` 与 V2 原有路径和 Manifest 保持不变。新 CLI 下载发布 schema_version=3：
 
 ```text
 data/source/{provider}/{dataset_id}/
-data/normalized/bars/{market}/1d/{symbol}/{dataset_id}/
-data/normalized/adjustments/{market}/{symbol}/{dataset_id}/
-data/normalized/corporate_actions/{market}/{symbol}/{dataset_id}/
-data/reference/instruments/{market}/{symbol}/{dataset_id}/
-data/reference/calendars/{market}/{symbol}/{dataset_id}/
+data/normalized/bars/{asset_class}/{venue}/{timeframe}/{symbol}/{dataset_id}/bars.parquet
 data/manifests/{dataset_id}.json
+data/manifests/{dataset_id}.json.sha256
 ```
 
-版本目录支持重复请求的新快照；相同 dataset ID 拒绝覆盖。不同版本不会自动互相替换。Loader 找到多个匹配版本时必须指定 ID。Manifest 包含请求/实际区间、供应商版本、行数、单位/复权假设、source/normalized 文件 SHA-256；manifest 旁边的 `.json.sha256` 校验 manifest 本身。Manifest 最后发布；normalization 失败的 source 留作审计，没有 manifest 就不能进入研究读取。
+版本不可覆盖，不使用可变 latest 指针。离线读取不下载缺失文件，不填值/去重/修复；重叠 V2 版本必须指定 ID，V3 读取总是显式 ID。
+Source Data 指供应商响应快照，不能据此认定它就是历史未复权价格。
 
-Canonical bars 是 `date, symbol, open, high, low, close, volume`，可有 `amount`。`date` 为 `datetime64[ns]`、无时区、午夜的交易所本地 session 标签，**不是 UTC 时间戳**。存储和返回按 `date, symbol` 升序，键唯一；价格必须有限且正，OHLC 关系合法，成交量非负整数。Loader/Validator 不排序修复、不去重、不补值。
+V3 必需 UTC `timestamp, symbol, open, high, low, close`，timestamp 语义为 bar_start。
+`volume, tick_volume, amount, open_interest` 可缺省；不把无真实成交量的 Forex 填为零。周期支持 1m、5m、15m、30m、1h、4h、1d。
+Instrument 区分资产类别、venue、canonical symbol 和 provider_symbol。可存期货数据/元信息，但期货执行账户未实现。
 
-## Price Semantics
+V2 日线 date 是无时区的本地 session 标签，不是 UTC。V2→UTC 读取必须显式给 session_timezone；新的 Yahoo/Tushare 日线 V3 也记录午夜 session 坐标假设，不推断实际 intraday 开闭市时间。
 
-Source Data 是供应商返回快照，和 Raw Price 是两个概念。
-
-| price_basis | 产生方式 |
-| --- | --- |
-| `raw` | Tushare `daily` 未复权 OHLC；Yahoo `auto_adjust=False` 的 source OHLC仍有拆股调整，因此用冻结的全部后续拆股记录显式反向还原历史价格坐标 |
-| `provider_adjusted` | Yahoo `Adj Close / reconstructed raw Close` 得到 `provider_adjusted_close_ratio`，同时乘到 raw OHLC；保留供应商复权坐标 |
-| `qfq` | cumulative factor：`raw × factor / 截至请求结束日的最新 factor`，各 symbol 独立锚定；保留停牌日因子，不使用结束日之后的 factor |
-| `hfq` | `raw × cumulative factor`，保留供应商因子绝对尺度，与 Tushare SDK 一致，不按所选起始日重新缩放 |
-| `legacy_provider_adjusted` | 直接读取原 V1 `auto_adjust=True` 冻结 OHLC，避免重新生成历史价格或改变实验定义 |
-
-`qfq/hfq` 需要 cumulative factor；Yahoo ratio 与 Tushare factor 不可混用。不支持或缺失的价格口径明确失败。OHLC 复权不改变 `volume/amount`。
-
-Yahoo normalization 会显式反向还原供应商经过拆股缩放的 volume 和 dividend 金额；还原后无法得到整数成交量则报错。Tushare `vol` 从手乘 100 转为股，`amount` 从千元乘 1000 转为 CNY。仅容忍单位转换中的浮点舍入噪声，不接受真实分数股。
-
-这些是下载时点的供应商快照；后来的公司行动、数据修订、qfq 锚点变化都会影响历史研究价格。Future Mutation Test 验证程序对已冻结输入的因果性，不能证明供应商数据或复权历史在原历史时点已经可得。
-
-公式与口径参考：[yfinance auto_adjust 源码](https://github.com/ranaroussi/yfinance/blob/main/yfinance/utils.py)、[Yahoo 拆股价格口径](https://github.com/ranaroussi/yfinance/issues/687)、[Tushare daily 单位](https://tushare.pro/document/2?doc_id=27)、[Tushare pro_bar 复权](https://tushare.pro/document/2?doc_id=109)。实现的 SDK 数值对照使用本项目锁定版本的实际源码。
-
-## Yahoo Example
+## Yahoo / Tushare
 
 ```bash
-python scripts/download_data.py --provider yahoo --market US --symbol SPY --start 2015-01-01 --end 2025-12-31 --frequency 1d
 python scripts/download_data.py --provider yahoo --market US --symbol AAPL --start 2015-01-01 --end 2025-12-31 --frequency 1d
-```
-
-Yahoo 使用 `auto_adjust=False, repair=False, actions=True`，结束日期包含在请求范围。返回 timestamp 先转 exchange timezone 再移除时区。为反向还原拆股价格另取完整历史动作快照，其中可以有请求结束日之后的动作；这些用于显式 normalization，不交给 strategy。
-
-CLI 输出 dataset ID、请求/实际区间、source/normalized/manifest 路径和 SHA。下载新 SPY 数据不改变默认 V1 实验。
-
-## Tushare Example
-
-```bash
 export TUSHARE_TOKEN='your-token'
 python scripts/download_data.py --provider tushare --market CN --symbol 000001.SZ --start 2015-01-01 --end 2025-12-31 --frequency 1d
-python scripts/download_data.py --provider tushare --market CN --symbol 600519.SH --start 2015-01-01 --end 2025-12-31 --frequency 1d
 ```
 
-Token 只从环境变量读取，不写 YAML、不使用 `set_token` 保存到本地。`.env.example` 仅给出变量名，程序不自动解析 `.env`。缺 token 明确失败；真实 API 还受账户积分和权限约束。响应触及 6000 行限制时拒绝当作完整数据，需缩短请求区间。
+SDK 的 capabilities 如实声明：本期 Yahoo 为 US equity daily，Tushare 为 CN equity daily；声明不等于支持所有 AssetClass/Timeframe。Tushare token 只从环境读取，不写文件、不调用 set_token。真实 Tushare 验收仍受 token/账户权限约束。
+Yahoo source `auto_adjust=False` OHLC 仍包含拆股缩放；normalization 用全部冻结后续拆股显式反向还原 raw OHLC、volume 与 dividend。Tushare vol 手×100→股，amount 千元×1000→CNY。已有 V2 因子与事件语义沿用。
 
-## Dataset Verification / Loader
+| price_basis | 定义 |
+| --- | --- |
+| raw | 经明确 normalization 的历史未复权 OHLC；账户尚不处理公司行动 |
+| provider_adjusted | Yahoo raw × Adj Close / reconstructed raw Close |
+| qfq | Tushare raw × cumulative factor / 请求结束日及之前的最新 factor；含停牌日 anchor |
+| hfq | raw × absolute cumulative factor，不按区间首日重新缩放 |
+| legacy_provider_adjusted | 直接使用原冻结 V1 auto_adjust=True 数据 |
+
+缺失因子或错误 factor_semantics 明确失败；不混用 Yahoo ratio 与 Tushare cumulative factor。复权坐标是 synthetic account，无额外分红现金/拆股 quantity 处理。
+这些是下载时快照，不能证明供应商历史坐标在原时间点可得；其修订/漏项仍可能存在。
+
+## 本地 Forex 导入
 
 ```bash
-python scripts/verify_dataset.py --dataset-id <download-output-id>
-python scripts/inspect_data.py --dataset-id <download-output-id> --price-basis raw
-python scripts/verify_dataset.py --legacy-path data/raw/spy_daily.parquet
+python scripts/download_data.py --provider local --input /path/to/EURUSD.csv \
+  --symbol EURUSD --provider-symbol EURUSD.a --asset-class forex --venue broker_x \
+  --frequency 15m --source-timezone UTC --timestamp-semantics bar_start
 ```
 
-两种检查都只读取本地。也可用 `--manifest path/to/manifest.json`；`--root` 与 `--data-config` 支持独立数据存储目录。校验失败时 `verify_dataset.py` 输出 FAIL 并以非零状态退出。
+CSV/Parquet 列使用 timestamp/open/high/low/close；symbol 若存在必须匹配 provider_symbol。原始字节、解析表、来源元数据都冻结，再执行 normalization/validation/store/manifest。Naive 来源必须按声明时区解释；bar_end 显式减去固定周期得到 bar_start。
+只有供应商 tick count 时可提供 tick_volume，不提供 volume。真实成交量/金额/持仓单位由来源声明，程序不猜测。没有假造在线 FX 数据源。
+
+## 离线读取与重采样
+
+```bash
+python scripts/verify_dataset.py --dataset-id <id>
+python scripts/inspect_data.py --dataset-id <id>
+python scripts/verify_dataset.py --legacy-path data/raw/spy_daily.parquet
+python scripts/resample_data.py --source-dataset-id <1m-id> --dataset-id <new-4h-id> \
+  --target-timeframe 4h --aggregation-timezone UTC --anchor 00:00
+```
+
+聚合要求完整窗口，不补缺失、不丢弃首尾 partial；时区、anchor、父版本与 SHA、聚合规则进入 lineage。DST 不确定/变长窗口明确失败。
 
 ```python
-from src.data.loader import load_bars
+from quant_lab.data.loader import load_dataset, iter_bars
 
-bars = load_bars(market='US', symbols=['SPY', 'AAPL'],
-                 start='2020-01-01', end='2025-12-31', price_basis='raw')
-# 返回 date × symbol long format，键唯一、升序。
-# 多个版本时可用 dataset_id='...'，或逐标的映射：
-# dataset_id={'SPY': 'spy-version-id', 'AAPL': 'aapl-version-id'}
+frame = load_dataset('explicit_id', symbols=['EURUSD'], timeframe='15m')
+for bar in iter_bars(frame):
+    print(bar.timestamp, bar.available_at)
+
+# V2 compatibility:
+from quant_lab.data.loader import load_bars
+bars = load_bars('US', ['SPY', 'AAPL'], '2020-01-01', '2025-12-31',
+                 price_basis='raw', dataset_id={'SPY': 'spy-v2-id', 'AAPL': 'aapl-v2-id'})
 ```
 
-`config/data.yaml` 管数据位置、供应商启用状态和日线默认值。`config/strategy.yaml` 设置 `symbol, market, price_basis, fast_window, slow_window`；`config/backtest.yaml` 设置资金、成本、日期、报告和指标口径，不直接指向 Parquet。
-
-新实验可复制 strategy/backtest YAML，设置 AAPL/US 与 `raw` 或 `provider_adjusted`，并给出独立 reports_dir：
+## Chan 观察
 
 ```bash
-python scripts/run_backtest.py --strategy-config path/to/strategy.yaml --backtest-config path/to/backtest.yaml --dataset-id <id>
+python scripts/inspect_chan.py --dataset-id <id> --symbol EURUSD --plot
+python scripts/run_backtest.py --strategy-config config/chan_fx.yaml \
+  --backtest-config /path/to/observation-range.yaml --dataset-id <15m-fx-id> --observe-only
 ```
 
-交易引擎只接收一个 symbol；多标的读取不意味着多资产 Portfolio 已实现。默认资金 100,000、手续费 0.05%、单边滑点 0.02%，无风险年利率 0。
+导出 raw_bars、merged_bars、fractals、strokes CSV 和 chan.json；inspect 的 --plot 生成静态 chan.png。
+默认初始包含没有方向时报错；显式 up/down 是临时实验策略。等高/等低分型严格排除，端点相等不替换，gap 不增加距离。confirmed_at 与 pivot_time 分开，confirmed 笔不可回写，最后 tentative 可以延伸。
+不实现最终 Chan 买卖规则，也不输出虚假的 FX 收益。
 
-## 账户、时间与输出
+## 回测与报告
 
-T 收盘才知道目标仓位，T+1 开盘执行。60 日预热意味着第 61 个交易日才可能成交；末日的新信号不成交。Benchmark 在预热后首个可执行开盘尝试买入一次。
+```bash
+python scripts/run_backtest.py --strategy-config /path/to/equity-strategy.yaml \
+  --backtest-config /path/to/backtest.yaml --dataset-id <v2-or-v3-id>
+```
 
-买入 `execution_price = raw_open × (1 + slippage_rate)`，卖出为减号。`trade_value = quantity × execution_price`，`commission = trade_value × commission_rate`，`slippage_cost` 只作归因，已经进入成交价，不再扣一次现金。`raw_open` 在历史 V1 实验里表示所选复权坐标的滑点前开盘价，不能解释成历史真实美元价格。
+V3 Equity 可使用分钟线；单标的、long/cash、整数股、全现金分配、下一可用开盘成交。
+Benchmark 在策略预热后的首次可成交开盘尝试买入一次。末根信号不成交，不强制期末平仓。
+滑点进入 execution_price，trade_value=quantity×execution_price，commission 单独扣除，slippage_cost 不二次扣现金。
 
-按可用现金与含手续费单股成本向下取整买入。成本基础包含买入手续费；已实现损益包含两侧手续费与滑点。不借款、不允许负现金，期末不强制平仓。
+完成回测输出 trades.csv、equity.csv、metrics.json、equity_curve.png、drawdown.png，另有 benchmark 两份 CSV。
+V3 保存逐 bar 净值、bar_return、valuation_time，风险指标用 UTC 日末已知净值重算日收益；报告记录 metrics_frequency=daily。历史 V1 CSV 的列、数值与哈希保留。
+报告审计包含配置、版本、Manifest/SHA、源码 SHA、环境和假设。数据、报告、缓存与凭据不进 Git。
 
-每次输出 `trades.csv, equity.csv, metrics.json, equity_curve.png, drawdown.png`，另有 benchmark 独立交易/净值 CSV。audit 记录配置、market/provider/price_basis/dataset_id、manifest、SHA、源码哈希、环境版本及 Future Mutation Test cutoff。标题、标的、均线窗口、货币、session 文案均由实验决定。数据、报告、缓存和凭据不进入 Git。
+## 边界
 
-总收益为期末净值/初始资金−1；CAGR 用日历年；波动率/Sharpe 用配置的 sessions/year。回撤从初始资金高水位计算。成交笔数与已平仓往返次数分开，胜率等仅统计已平仓往返。Sortino 的负超额收益 RMS 以全部日样本作分母；Turnover 为双边成交金额/平均每日净值，不年化。无定义比率输出 JSON null。
-
-## Known Limitations
-
-Yahoo 仍可能有缺漏、错误拆股/分红或历史修订；反向拆股还原依赖供应商动作记录的完整性。US 只有 weekday 最低检查，未独立验证全部节假日或缺失 session。CN 用供应商交易日历检验已有 bars 的合法 open 日期，不把停牌当成数据补齐。
-
-Tushare 的 corporate action event normalization 暂不支持，明确抛 NotImplementedError；Yahoo 保存 dividend/split 事件。账户尚不处理分红现金或拆股持仓变更：复权模式是 synthetic adjusted-price account，raw 模式是无 corporate action accounting 的研究 smoke test。
-
-尚未建模 A 股 T+1、涨跌停、停牌撮合、整手约束和完整税费；CN 报告明确附带此限制。没有多资产组合、实盘、机器学习、参数优化或 Paper Trading。完成 V2 后应先人工 review，再决定下一阶段。
+CN Equity 仍是 smoke：未建模完整 A 股 T+1、涨跌停、整手、停牌撮合和税费。Corporate action 存储但不应用于账户。
+US/CN 日历缺漏与来源准确性限制沿用 V2。不存在完整 FX broker simulation、期货账户、多资产组合、实盘、ML、参数优化、数据库或实时框架。

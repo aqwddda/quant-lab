@@ -245,12 +245,20 @@ Keep generated data, reports, credentials and secrets out of Git.
 
 ## Current phase
 
-The current Data Layer supports US/CN daily data and multi-symbol local reads.
-The Backtest Engine remains single asset, long or cash, with 20-day / 60-day moving
-averages, T close signals and T+1 open execution. The default SPY experiment uses
-legacy_provider_adjusted prices and must retain its recorded V1 regression results.
+The current package lives under src/quant_lab/; historical src.* modules are
+compatibility exports. Data supports immutable V1/V2 compatibility and V3 UTC
+bars, local Forex snapshots, multi-symbol reads and explicitly anchored resampling.
+Chan-Core implements only inclusion, strict fractals and strokes, incrementally;
+confirmed structures must never be rewritten. Undefined theory remains documented
+as provisional defaults or explicit errors.
+The Backtest Engine consumes Strategy/Execution protocols and remains single asset,
+long or cash Equity accounting. V3 intraday Equity research uses daily equity
+snapshots for risk metrics. The default SPY experiment uses legacy_provider_adjusted
+prices and must retain its recorded V1 regression results exactly.
 CN backtests are data pipeline smoke tests and must disclose missing A-share
 execution rules. Corporate action events are stored but not applied to accounts.
+Chan-FX is structure observation only; Forex spread, lot, leverage, margin, swap,
+short and final trading rules are not defined. Do not invent them.
 
 Do NOT implement:
 
@@ -261,7 +269,7 @@ Do NOT implement:
 - machine learning
 - optimization algorithms
 - portfolio optimization
-- intraday trading
+- live intraday trading
 
 unless explicitly requested.
 
