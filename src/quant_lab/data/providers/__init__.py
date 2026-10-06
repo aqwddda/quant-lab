@@ -2,7 +2,9 @@
 from quant_lab.data.providers.yahoo import YahooProvider
 from quant_lab.data.providers.tushare import TushareProvider
 
-PROVIDERS = {'yahoo': YahooProvider, 'tushare': TushareProvider}
+from quant_lab.data.providers.local import LocalBarProvider
+
+PROVIDERS = {'yahoo': YahooProvider, 'tushare': TushareProvider, 'local': LocalBarProvider}
 
 
 def get_provider(name, **kwargs):

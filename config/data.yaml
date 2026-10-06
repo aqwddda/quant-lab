@@ -13,3 +13,5 @@ providers:
   tushare:
     enabled: true
     token_env: TUSHARE_TOKEN
+  local:
+    enabled: true

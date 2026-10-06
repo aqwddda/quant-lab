@@ -81,10 +81,37 @@ def download_dataset_v3(provider, symbol, start, end, timeframe='1d', *, store=N
         assumptions=[*snapshot.assumptions,
             'Daily timestamp is exchange-session midnight converted to UTC; it is not an intraday exchange opening timestamp.'])
 
+
+def import_local_dataset(path, *, instrument, timeframe, source_timezone, timestamp_semantics,
+                         store=None, dataset_id=None):
+    from quant_lab.data.providers.local import LocalBarProvider
+    from quant_lab.data.normalization.local import normalize_local
+    store = store or DataStore()
+    stamp = datetime.now(timezone.utc)
+    dataset_id = dataset_id or f'local_{instrument.symbol}_v3_{stamp:%Y%m%dT%H%M%S%fZ}'
+    safe_component(dataset_id)
+    if store.manifest_path(dataset_id).exists() or store.resolve(Path(store.storage['source_dir']) / 'local' / dataset_id).exists():
+        raise FileExistsError('Refusing to overwrite frozen dataset')
+    snapshot = LocalBarProvider().fetch_snapshot(path, instrument=instrument, timeframe=timeframe,
+        source_timezone=source_timezone, timestamp_semantics=timestamp_semantics)
+    sources = store.freeze_sources(dataset_id, 'local', snapshot.source_frames)
+    bars = normalize_local(snapshot.prepared)
+    return store.save_bars_v3(bars, dataset_id=dataset_id, provider='local', provider_version=snapshot.provider_version,
+        instruments=[instrument], timeframe=timeframe, source_timezone=source_timezone,
+        source_files=sources, assumptions=[*snapshot.assumptions,
+            f'Source timestamp semantics: {timestamp_semantics}; canonical timestamp semantics: bar_start.',
+            'Fixed elapsed-time bar duration; no inferred broker sessions or daily rollover.'])
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--provider', default='yahoo')
     parser.add_argument('--market', default='US')
+    parser.add_argument('--input', type=Path)
+    parser.add_argument('--asset-class', choices=['equity','forex','futures'])
+    parser.add_argument('--venue')
+    parser.add_argument('--provider-symbol')
+    parser.add_argument('--source-timezone')
+    parser.add_argument('--timestamp-semantics', choices=['bar_start','bar_end'])
     parser.add_argument('--symbol', default='SPY')
     parser.add_argument('--start', default='2015-01-01')
     parser.add_argument('--end', default='2025-12-31')
@@ -100,6 +127,15 @@ def main():
     settings = config['providers'][args.provider]
     if settings.get('enabled') is not True:
         raise ValueError(f'Provider disabled: {args.provider}')
+    if args.provider == 'local':
+        if any(value is None for value in [args.input,args.asset_class,args.venue,args.provider_symbol,args.source_timezone,args.timestamp_semantics,args.frequency]):
+            raise ValueError('Local import requires input, asset-class, venue, provider-symbol, source-timezone, timestamp-semantics and frequency')
+        from quant_lab.market import Instrument
+        manifest = import_local_dataset(args.input, instrument=Instrument(args.symbol,args.provider_symbol,args.asset_class,args.venue),
+            timeframe=args.frequency, source_timezone=args.source_timezone, timestamp_semantics=args.timestamp_semantics,
+            store=DataStore(args.root,config['storage']),dataset_id=args.dataset_id)
+        print(json.dumps(manifest,indent=2,ensure_ascii=False,allow_nan=False))
+        return
     options = {'cache_dir': args.root / '.cache/yfinance'} if args.provider == 'yahoo' else {'token_env': settings['token_env']}
     if args.provider not in PROVIDERS or args.market != PROVIDERS[args.provider].market:
         raise ValueError('Provider/market mismatch')

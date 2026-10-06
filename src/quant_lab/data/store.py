@@ -63,6 +63,13 @@ class DataStore:
             safe_component(name)
             if isinstance(frame, pd.DataFrame):
                 entries[name] = self._save_frame(directory / (name + '.parquet'), frame, preserve_index=True)
+            elif isinstance(frame, bytes):
+                relative = directory / (name + '.bin')
+                path = self.resolve(relative)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open('xb') as handle:
+                    handle.write(frame)
+                entries[name] = {'path': str(relative), 'sha256': file_sha256(path)}
             elif isinstance(frame, dict):
                 relative = directory / (name + '.json')
                 path = self.resolve(relative)
