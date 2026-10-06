@@ -48,7 +48,11 @@ def resolve_strategy_config(config):
         raise ValueError('Unknown data configuration keys')
     AssetClass(data['asset_class'])
     Timeframe.parse(data['timeframe'])
-    if config['strategy']['name'] != 'sma_cross':
+    if config['strategy']['name'] == 'chan_fx':
+        if config['strategy']['params'] or set(config.get('chan',{})) - {'initial_direction_policy'}:
+            raise ValueError('Chan-FX has no trading params; only initial_direction_policy is configurable')
+        return {**data,'name':'chan_fx','chan':config.get('chan',{})}, config
+    if 'chan' in config or config['strategy']['name'] != 'sma_cross':
         raise NotImplementedError('Trading rules are implemented only for sma_cross')
     params = config['strategy']['params']
     if set(params) != {'fast_window','slow_window'}:
@@ -94,6 +98,7 @@ def main():
     parser.add_argument('--backtest-config', type=Path, default=ROOT / 'config/backtest.yaml')
     parser.add_argument('--data-config', type=Path, default=ROOT / 'config/data.yaml')
     parser.add_argument('--data-root', type=Path, default=ROOT)
+    parser.add_argument('--observe-only',action='store_true',help='Chan-FX structure observation without execution or accounting')
     parser.add_argument('--dataset-id', help='Explicit frozen version (required when ambiguous)')
     args = parser.parse_args()
     with args.strategy_config.open() as handle:
@@ -104,6 +109,37 @@ def main():
         'reports_dir', 'annualization_factor', 'risk_free_rate',
     ])
     store = DataStore.from_config(args.data_config, args.data_root)
+    if strategy.get('name') == 'chan_fx':
+        if not args.observe_only:
+            raise NotImplementedError('Chan-FX trading rules and Forex execution are undefined; use --observe-only')
+        if not args.dataset_id:
+            raise ValueError('Chan observation requires an explicit dataset ID')
+        if strategy['asset_class'] != 'forex' or strategy['price_basis'] != 'raw':
+            raise ValueError('Chan-FX observer requires Forex raw bars')
+        from quant_lab.chan import ChanConfig
+        from quant_lab.strategies.chan_fx import ChanFxStrategy
+        from quant_lab.strategies.base import StrategyContext
+        from quant_lab.data.inspection import write_chan_outputs
+        first,last = pd.Timestamp(config['start_date']),pd.Timestamp(config['end_date'])
+        if first.tzinfo is None: first=first.tz_localize('UTC')
+        if last.tzinfo is None: last=last.tz_localize('UTC')+pd.Timedelta(days=1)-pd.Timedelta(nanoseconds=1)
+        data=load_dataset(args.dataset_id,store=store,symbols=[strategy['symbol']],
+            timeframe=strategy['timeframe'],start=first,end=last)
+        manifest=data.attrs['manifests'][0]
+        instrument=next(x for x in manifest['instruments'] if x['symbol']==strategy['symbol'])
+        if instrument['asset_class'] != 'forex':
+            raise ValueError('Configured asset class does not match dataset')
+        observer=ChanFxStrategy(ChanConfig(**strategy['chan']))
+        for i,bar in enumerate(iter_bars(data)):
+            observer.on_bar(StrategyContext(i,bar.available_at),bar)
+        output=ROOT/config['reports_dir']/('chan_'+args.dataset_id)
+        counts=write_chan_outputs(observer.analyzer,output,audit={'mode':'structure_observation_only',
+            'strategy_config':original_strategy,'manifest':manifest,
+            'assumptions':['No trades or Forex account are simulated; selected range is a cold start.']})
+        print(json.dumps({'output':str(output),**counts},ensure_ascii=False))
+        return
+    if args.observe_only:
+        raise ValueError('--observe-only is supported for chan_fx')
     if strategy.get('asset_class','equity') != 'equity':
         raise NotImplementedError('Forex/futures execution and accounting rules are undefined; use structure observation')
     selected = store.load_manifest(args.dataset_id) if args.dataset_id else None

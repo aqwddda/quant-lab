@@ -87,3 +87,17 @@ def test_confirmed_prefix_and_future_mutation():
     assert tuple(s for s in other.confirmed_strokes if s.confirmed_at<=cutoff)==confirmed
     assert isinstance(analyzer.raw_bars,tuple)
     with pytest.raises(Exception): analyzer.confirmed_strokes[0].end.price=100
+
+
+def test_future_inclusion_preserves_as_known_right_snapshot():
+    from dataclasses import replace
+    history=bars([3,1,3])
+    analyzer=ChanAnalyzer().extend(history)
+    fractal=analyzer.fractals[0]
+    # Current right UP range [5,3] contains [4.5,3.5], so its low changes.
+    later=replace(history[-1],timestamp=history[-1].available_at,open=4.,high=4.5,low=3.5,close=4.)
+    analyzer.update(later)
+    assert analyzer.fractals==(fractal,)
+    assert analyzer.merged_bars[-1].low==3.5
+    assert fractal.right.low==3
+    assert fractal.right.raw_indices==(2,)

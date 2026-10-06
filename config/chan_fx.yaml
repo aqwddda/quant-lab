@@ -1,0 +1,12 @@
+strategy:
+  name: chan_fx
+  params: {}
+
+data:
+  symbol: EURUSD
+  asset_class: forex
+  timeframe: 15m
+  price_basis: raw
+
+chan:
+  initial_direction_policy: error
