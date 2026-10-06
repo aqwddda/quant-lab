@@ -5,13 +5,13 @@ import subprocess
 import sys
 import pandas as pd
 import pytest
-from quant_lab.chan import ChanAnalyzer
-from quant_lab.strategies.chan_fx import ChanFxStrategy
-from quant_lab.strategies.base import StrategyContext
-from quant_lab.data.inspection import write_chan_outputs
-from quant_lab.data.store import DataStore
-from quant_lab.market import Instrument
-from quant_lab.validation import chan_future_mutation_test
+from src.chan import ChanAnalyzer
+from src.strategies.chan_fx import ChanFxStrategy
+from src.strategies.base import StrategyContext
+from src.data.inspection import write_chan_outputs
+from src.data.store import DataStore
+from src.market import Instrument
+from src.validation import chan_future_mutation_test
 from test_strokes import bars
 
 
@@ -35,7 +35,7 @@ def test_inspection_cli(tmp_path):
         'symbol':'EURUSD','open':(high+low)/2,'high':high,'low':low,'close':(high+low)/2}
         for i,(high,low) in enumerate(fixture['raw_ranges'])])
     store=DataStore(tmp_path/'store')
-    store.save_bars_v3(frame,dataset_id='chan_fixture',provider='local',provider_version='1',
+    store.save_dataset(frame,dataset_id='chan_fixture',provider='local',provider_version='1',
         instruments=[Instrument('EURUSD','EURUSD.a','forex','fixture')],timeframe='1m',source_timezone='UTC',source_frames={'bars':frame})
     proc=subprocess.run([sys.executable,str(root/'scripts/inspect_chan.py'),'--dataset-id','chan_fixture',
         '--symbol','EURUSD','--root',str(store.root),'--output',str(tmp_path/'output'),'--plot'],capture_output=True,text=True)
@@ -50,11 +50,11 @@ def test_inspection_cli(tmp_path):
 
 def test_chan_core_has_no_dataframe_or_provider_imports():
     import ast
-    folder=Path(__file__).resolve().parents[2]/'src/quant_lab/chan'
+    folder=Path(__file__).resolve().parents[2]/'src/chan'
     for path in folder.glob('*.py'):
         for node in ast.walk(ast.parse(path.read_text())):
             names = [a.name for a in node.names] if isinstance(node,ast.Import) else [node.module or ''] if isinstance(node,ast.ImportFrom) else []
-            assert not any(name.split('.')[0] in {'pandas','numpy','yfinance','tushare','matplotlib'} or name.startswith('quant_lab.data') for name in names)
+            assert not any(name.split('.')[0] in {'pandas','numpy','yfinance','tushare','matplotlib'} or name.startswith('src.data') for name in names)
 
 
 def test_chan_config_observer_cli(tmp_path):
@@ -64,7 +64,7 @@ def test_chan_config_observer_cli(tmp_path):
     frame=pd.DataFrame([{'timestamp':b.timestamp,'symbol':b.symbol,'open':b.open,
         'high':b.high,'low':b.low,'close':b.close} for b in history])
     store=DataStore(tmp_path/'store')
-    store.save_bars_v3(frame,dataset_id='fx_observer',provider='local',provider_version='1',
+    store.save_dataset(frame,dataset_id='fx_observer',provider='local',provider_version='1',
         instruments=[Instrument('EURUSD','EURUSD.a','forex','fixture')],timeframe='1m',
         source_timezone='UTC',source_frames={'bars':frame})
     strategy=yaml.safe_load((root/'config/chan_fx.yaml').read_text())

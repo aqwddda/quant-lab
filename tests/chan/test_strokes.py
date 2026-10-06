@@ -1,9 +1,9 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import pytest
-from quant_lab.market import Bar, Timeframe
-from quant_lab.chan import ChanAnalyzer, StrokeStatus, FractalType, Direction
-from quant_lab.chan.stroke import assert_stroke_extremes
+from src.market import Bar, Timeframe
+from src.chan import ChanAnalyzer, StrokeStatus, FractalType, Direction
+from src.chan.stroke import assert_stroke_extremes
 
 
 def bars(values):

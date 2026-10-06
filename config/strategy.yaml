@@ -8,5 +8,5 @@ data:
   symbol: SPY
   asset_class: equity
   timeframe: 1d
-  price_basis: legacy_provider_adjusted
+  price_basis: provider_adjusted
   market: US

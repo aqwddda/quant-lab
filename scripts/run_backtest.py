@@ -8,6 +8,8 @@ import platform
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(ROOT))
 os.environ.setdefault('MPLCONFIGDIR', str(ROOT / '.cache' / 'matplotlib'))
 
 import matplotlib
@@ -15,13 +17,11 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 import yaml
-from quant_lab.backtest.legacy import run_backtest
-from quant_lab.data.manifest import file_sha256
-from quant_lab.data.loader import load_bars, load_dataset, iter_bars
-from quant_lab.data.store import DataStore
-from quant_lab.backtest.execution import Costs
-from quant_lab.backtest.metrics import calculate_metrics
-from quant_lab.validation import future_mutation_test
+from src.data.manifest import file_sha256
+from src.data.loader import load_dataset, iter_bars
+from src.data.store import DataStore
+from src.backtest.execution import Costs
+from src.backtest.metrics import calculate_metrics
 
 
 def read_config(path, expected):
@@ -34,17 +34,14 @@ def read_config(path, expected):
 
 
 def resolve_strategy_config(config):
-    """Accept historical experiments; new configurations separate strategy/data."""
-    legacy = {'symbol','market','price_basis','fast_window','slow_window'}
-    if set(config) == legacy:
-        return dict(config), config
+    """Validate the formal strategy/data configuration."""
     if set(config) not in ({'strategy','data'},{'strategy','data','chan'}) or set(config['strategy']) != {'name','params'}:
         raise ValueError('Require strategy{name,params} and data configuration')
-    from quant_lab.market import AssetClass, Timeframe
+    from src.market import AssetClass, Timeframe
     data = config['data']
     if not {'symbol','asset_class','timeframe','price_basis'}.issubset(data):
         raise ValueError('Data requires symbol, asset_class, timeframe, price_basis')
-    if set(data) - {'symbol','asset_class','timeframe','price_basis','market','venue','session_timezone'}:
+    if set(data) - {'symbol','asset_class','timeframe','price_basis','market','venue'}:
         raise ValueError('Unknown data configuration keys')
     AssetClass(data['asset_class'])
     Timeframe.parse(data['timeframe'])
@@ -57,15 +54,14 @@ def resolve_strategy_config(config):
     params = config['strategy']['params']
     if set(params) != {'fast_window','slow_window'}:
         raise ValueError('sma_cross requires fast_window and slow_window')
-    resolved = {**data, **params, 'market': data.get('market','US')}
+    resolved = {**data, **params, 'name': 'sma_cross'}
     return resolved, config
 
 def write_reports(result, report, output):
     output.mkdir(parents=True, exist_ok=True)
     equity = result.equity.copy()
     equity['benchmark_equity'] = result.benchmark_equity.equity
-    return_column = 'daily_return' if 'daily_return' in result.equity else 'bar_return'
-    equity['benchmark_' + return_column] = result.benchmark_equity[return_column]
+    equity['benchmark_bar_return'] = result.benchmark_equity.bar_return
     equity['benchmark_drawdown'] = result.benchmark_equity.drawdown
     equity.to_csv(output / 'equity.csv', index=False, float_format='%.15g')
     result.trades.to_csv(output / 'trades.csv', index=False, float_format='%.15g')
@@ -80,12 +76,12 @@ def write_reports(result, report, output):
         ('drawdown.png', 'drawdown', 'Drawdown (%)', 100),
     ]:
         fig, ax = plt.subplots(figsize=(11, 5), layout='constrained')
-        axis_time = 'valuation_time' if 'valuation_time' in result.equity else 'date'
+        axis_time = 'valuation_time'
         ax.plot(result.equity[axis_time], result.equity[column] * multiplier,
                 label=f"{strategy['symbol']} SMA {strategy['fast_window']}/{strategy['slow_window']}")
         ax.plot(result.benchmark_equity[axis_time], result.benchmark_equity[column] * multiplier,
                 label=f"{strategy['symbol']} buy & hold", alpha=0.8)
-        ax.set(xlabel='UTC valuation timestamp' if axis_time == 'valuation_time' else 'Exchange session date', ylabel=ylabel,
+        ax.set(xlabel='UTC valuation timestamp', ylabel=ylabel,
                title=f"Net of commission and slippage; {strategy['price_basis']} OHLC")
         ax.legend()
         ax.grid(alpha=0.25)
@@ -100,7 +96,7 @@ def main():
     parser.add_argument('--data-config', type=Path, default=ROOT / 'config/data.yaml')
     parser.add_argument('--data-root', type=Path, default=ROOT)
     parser.add_argument('--observe-only',action='store_true',help='Chan-FX structure observation without execution or accounting')
-    parser.add_argument('--dataset-id', help='Explicit frozen version (required when ambiguous)')
+    parser.add_argument('--dataset-id', required=True, help='Explicit frozen dataset version')
     args = parser.parse_args()
     with args.strategy_config.open() as handle:
         original_strategy = yaml.safe_load(handle)
@@ -117,10 +113,10 @@ def main():
             raise ValueError('Chan observation requires an explicit dataset ID')
         if strategy['asset_class'] != 'forex' or strategy['price_basis'] != 'raw':
             raise ValueError('Chan-FX observer requires Forex raw bars')
-        from quant_lab.chan import ChanConfig
-        from quant_lab.strategies.chan_fx import ChanFxStrategy
-        from quant_lab.strategies.base import StrategyContext
-        from quant_lab.data.inspection import write_chan_outputs
+        from src.chan import ChanConfig
+        from src.strategies.chan_fx import ChanFxStrategy
+        from src.strategies.base import StrategyContext
+        from src.data.inspection import write_chan_outputs
         first,last = pd.Timestamp(config['start_date']),pd.Timestamp(config['end_date'])
         if first.tzinfo is None: first=first.tz_localize('UTC')
         if last.tzinfo is None: last=last.tz_localize('UTC')+pd.Timedelta(days=1)-pd.Timedelta(nanoseconds=1)
@@ -143,73 +139,48 @@ def main():
         raise ValueError('--observe-only is supported for chan_fx')
     if strategy.get('asset_class','equity') != 'equity':
         raise NotImplementedError('Forex/futures execution and accounting rules are undefined; use structure observation')
-    selected = store.load_manifest(args.dataset_id) if args.dataset_id else None
-    v3 = selected is not None and selected['schema_version'] == 3
-    if v3:
-        requested_tf = strategy.get('timeframe','1d')
-        def utc_boundary(value, end=False):
-            stamp = pd.Timestamp(value)
-            if stamp.tzinfo is None:
-                stamp = stamp.tz_localize('UTC')
-                if end:
-                    stamp += pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
-            return stamp
-        data = load_dataset(args.dataset_id,store=store,symbols=[strategy['symbol']],
-            start=utc_boundary(config['start_date']),end=utc_boundary(config['end_date'],True),
-            timeframe=requested_tf,price_basis=strategy['price_basis'])
-        instrument = next(x for x in selected['instruments'] if x['symbol']==strategy['symbol'])
-        if instrument['asset_class'] != strategy.get('asset_class','equity'):
-            raise ValueError('Configured asset class does not match dataset')
-        if strategy.get('venue') is not None and strategy['venue'] != instrument['venue']:
-            raise ValueError('Configured venue does not match dataset')
-        from quant_lab.backtest.engine import BacktestEngine
-        from quant_lab.backtest.execution import EquityCashExecutionModel, EquityBuyAndHoldExecutionModel
-        from quant_lab.backtest.portfolio import EquityPortfolio
-        from quant_lab.backtest.models import BacktestResult
-        from quant_lab.strategies.sma import SmaCrossStrategy
-        from quant_lab.validation import strategy_future_mutation_test
-        raw = tuple(iter_bars(data,requested_tf))
-        if len(raw) <= strategy['slow_window']:
-            raise ValueError('Require at least one eligible execution bar')
-        cutoffs = sorted(set([strategy['slow_window']-1,len(raw)//2,len(raw)-2]))
-        factory = lambda: SmaCrossStrategy(strategy['fast_window'],strategy['slow_window'])
-        for cutoff in cutoffs:
-            strategy_future_mutation_test(raw,raw[cutoff].available_at,factory)
-        costs = Costs(config['commission_rate'],config['slippage_rate'])
-        simulation = BacktestEngine(factory(),EquityCashExecutionModel(costs),EquityPortfolio(config['initial_cash'])).run(raw)
-        benchmark = BacktestEngine(factory(),EquityBuyAndHoldExecutionModel(costs),EquityPortfolio(config['initial_cash'])).run(raw)
-        result = BacktestResult(simulation.equity,simulation.trades,benchmark.equity,benchmark.trades)
-        time_column = 'timestamp'
-    else:
-        if strategy.get('timeframe','1d') != '1d':
-            raise ValueError('Intraday data requires an explicit V3 dataset ID')
-        data = load_bars(strategy['market'],[strategy['symbol']],config['start_date'],config['end_date'],
-            price_basis=strategy['price_basis'],store=store,dataset_id=args.dataset_id)
-        if (data.date.iloc[0]-pd.Timestamp(config['start_date'])).days>7 or (pd.Timestamp(config['end_date'])-data.date.iloc[-1]).days>7:
-            raise ValueError('Dataset does not cover requested experiment range')
-        if len(data)<=strategy['slow_window']:
-            raise ValueError('Require at least one eligible execution session')
-        cutoffs = sorted(set([strategy['slow_window']-1,len(data)//2,len(data)-2]))
-        for cutoff in cutoffs:
-            future_mutation_test(data,data.date.iloc[cutoff],strategy['fast_window'],strategy['slow_window'])
-        result = run_backtest(data,strategy['fast_window'],strategy['slow_window'],config['initial_cash'],
-            Costs(config['commission_rate'],config['slippage_rate']),strategy['symbol'])
-        time_column = 'date'
+    selected = store.load_manifest(args.dataset_id)
+    requested_tf = strategy['timeframe']
+    def utc_boundary(value, end=False):
+        stamp = pd.Timestamp(value)
+        if stamp.tzinfo is None:
+            stamp = stamp.tz_localize('UTC')
+            if end:
+                stamp += pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+        return stamp
+    data = load_dataset(args.dataset_id,store=store,symbols=[strategy['symbol']],
+        start=utc_boundary(config['start_date']),end=utc_boundary(config['end_date'],True),
+        timeframe=requested_tf,price_basis=strategy['price_basis'])
+    instrument = next(x for x in selected['instruments'] if x['symbol']==strategy['symbol'])
+    if instrument['asset_class'] != strategy.get('asset_class','equity'):
+        raise ValueError('Configured asset class does not match dataset')
+    if strategy.get('venue') is not None and strategy['venue'] != instrument['venue']:
+        raise ValueError('Configured venue does not match dataset')
+    from src.backtest.engine import BacktestEngine
+    from src.backtest.execution import EquityCashExecutionModel, EquityBuyAndHoldExecutionModel
+    from src.backtest.portfolio import EquityPortfolio
+    from src.backtest.models import BacktestResult
+    from src.strategies.sma import SmaCrossStrategy
+    from src.validation import strategy_future_mutation_test
+    raw = tuple(iter_bars(data,requested_tf))
+    if len(raw) <= strategy['slow_window']:
+        raise ValueError('Require at least one eligible execution bar')
+    cutoffs = sorted(set([strategy['slow_window']-1,len(raw)//2,len(raw)-2]))
+    factory = lambda: SmaCrossStrategy(strategy['fast_window'],strategy['slow_window'])
+    for cutoff in cutoffs:
+        strategy_future_mutation_test(raw,raw[cutoff].available_at,factory)
+    costs = Costs(config['commission_rate'],config['slippage_rate'])
+    simulation = BacktestEngine(factory(),EquityCashExecutionModel(costs),EquityPortfolio(config['initial_cash'])).run(raw)
+    benchmark = BacktestEngine(factory(),EquityBuyAndHoldExecutionModel(costs),EquityPortfolio(config['initial_cash'])).run(raw)
+    result = BacktestResult(simulation.equity,simulation.trades,benchmark.equity,benchmark.trades)
+    time_column = 'timestamp'
     manifests = data.attrs['manifests']
     manifest = manifests[0]
     checksum = manifest['normalized_sha256']
     for item in manifests:
-        if item['schema_version'] in (2,3):
-            if store.load_manifest(item['dataset_id']) != item:
-                raise ValueError('Dataset manifest changed during the run')
-            store.verify(item)
-        else:
-            for entry in item['normalized_files'].values():
-                if file_sha256(entry['path']) != entry['sha256']:
-                    raise ValueError('Data file changed during the run')
-            entry = item['metadata_file']
-            if file_sha256(entry['path']) != entry['sha256']:
-                raise ValueError('Dataset metadata changed during the run')
+        if store.load_manifest(item['dataset_id']) != item:
+            raise ValueError('Dataset manifest changed during the run')
+        store.verify(item)
     adjusted = strategy['price_basis'] != 'raw'
     assumptions = [
         'Signal at T close; fill at next available session open, never at T close.',
@@ -228,9 +199,9 @@ def main():
                         'Integer synthetic adjusted shares; no separate dividend cash flows or share changes.']
     else:
         assumptions += ['Raw-price research smoke test: corporate action cash flows and share changes are not modeled.']
-    if strategy['market'] == 'CN':
+    if instrument['venue'] in {'SSE','SZSE','BSE'}:
         assumptions += ['This backtest does not yet model all China A-share market-specific execution rules.']
-    currency = (instrument.get('quote_currency') or 'unspecified') if v3 else ('CNY' if strategy['market']=='CN' else 'USD')
+    currency = instrument.get('quote_currency') or 'unspecified'
     report = {
         'strategy': calculate_metrics(result.equity, result.trades, config['initial_cash'],
                                       config['annualization_factor'], config['risk_free_rate']),
@@ -243,7 +214,7 @@ def main():
             'timeframe': strategy.get('timeframe','1d'), 'provider': manifest['provider'],
             'price_basis': strategy['price_basis'], 'dataset_id': manifest['dataset_id'], 'currency': currency,
             'data_storage': {'root': str(store.root), **store.storage},
-            'manifest_sha256': file_sha256(store.manifest_path(manifest['dataset_id'])) if manifest['schema_version'] in (2,3) else manifest['metadata_file']['sha256'],
+            'manifest_sha256': file_sha256(store.manifest_path(manifest['dataset_id'])),
             'actual_start': str(data[time_column].iloc[0]),
             'actual_end': str(data[time_column].iloc[-1]), 'rows': len(data),
             'metrics_frequency': 'daily', 'metrics_timezone': 'UTC',

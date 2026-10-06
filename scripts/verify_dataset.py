@@ -4,12 +4,10 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(ROOT))
 
-from quant_lab.data.loader import verify_dataset
-from quant_lab.data.store import DataStore
-
-
-from quant_lab.data.inspection import dataset_arguments, read_dataset
+from src.data.inspection import dataset_arguments, read_dataset
 
 
 def main():
@@ -19,7 +17,7 @@ def main():
     try:
         manifest, frames = read_dataset(args)
         bars = frames['bars']
-        dates = bars['timestamp' if manifest['schema_version'] == 3 else 'date']
+        dates = bars.timestamp
         print(f"PASS dataset_id={manifest['dataset_id']} provider={manifest['provider']} "
               f"market={manifest.get('market', [x['venue'] for x in manifest.get('instruments', [])])} symbols={manifest['symbols']} rows={len(bars)} "
               f"range={dates.min()}..{dates.max()} "

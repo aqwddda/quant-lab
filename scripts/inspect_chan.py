@@ -1,13 +1,18 @@
 """Observe verified bars with Chan primitives; export structures without trades."""
 import argparse
+import sys
 import json
 from pathlib import Path
-from quant_lab.data.store import DataStore, ROOT
-from quant_lab.data.loader import load_dataset, iter_bars
-from quant_lab.data.inspection import write_chan_outputs
-from quant_lab.chan import ChanConfig
-from quant_lab.strategies.base import StrategyContext
-from quant_lab.strategies.chan_fx import ChanFxStrategy
+ROOT = Path(__file__).resolve().parents[1]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(ROOT))
+
+from src.data.store import DataStore, ROOT
+from src.data.loader import load_dataset, iter_bars
+from src.data.inspection import write_chan_outputs
+from src.chan import ChanConfig
+from src.strategies.base import StrategyContext
+from src.strategies.chan_fx import ChanFxStrategy
 
 
 def main():
@@ -16,15 +21,13 @@ def main():
     parser.add_argument('--symbol',required=True)
     parser.add_argument('--start')
     parser.add_argument('--end')
-    parser.add_argument('--session-timezone',help='Explicit V2 session-label adapter timezone')
     parser.add_argument('--initial-direction-policy',choices=['error','up','down'],default='error')
     parser.add_argument('--root',type=Path,default=ROOT)
     parser.add_argument('--output',type=Path)
     parser.add_argument('--plot',action='store_true')
     args=parser.parse_args()
     store=DataStore(args.root)
-    data=load_dataset(args.dataset_id,store=store,symbols=[args.symbol],start=args.start,end=args.end,
-        session_timezone=args.session_timezone)
+    data=load_dataset(args.dataset_id,store=store,symbols=[args.symbol],start=args.start,end=args.end)
     strategy=ChanFxStrategy(ChanConfig(args.initial_direction_policy))
     for i,bar in enumerate(iter_bars(data)):
         strategy.on_bar(StrategyContext(i,bar.available_at),bar)

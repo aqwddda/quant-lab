@@ -1,9 +1,14 @@
-"""Freeze one explicitly anchored derived dataset from a verified V3 source."""
+"""Freeze one explicitly anchored derived dataset from a verified canonical source."""
 import argparse
+import sys
 import json
 from pathlib import Path
-from quant_lab.data.store import DataStore, ROOT
-from quant_lab.data.resample import resample_dataset
+ROOT = Path(__file__).resolve().parents[1]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(ROOT))
+
+from src.data.store import DataStore, ROOT
+from src.data.resample import resample_dataset
 
 
 def main():

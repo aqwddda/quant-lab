@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
-from src.data.normalize import normalize_yahoo, integer_volume
+from src.data.normalization.yahoo import normalize_yahoo
+from src.data.normalization import integer_volume
 from src.data.providers.yahoo import YahooProvider
 from tests.data.test_yahoo_provider import FakeYahoo
 

@@ -5,10 +5,12 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(ROOT))
 
-from quant_lab.data.inspection import dataset_arguments, read_dataset
-from quant_lab.data.adjustment import adjust_bars
-from quant_lab.data.schema import PRICE_BASES
+from src.data.inspection import dataset_arguments, read_dataset
+from src.data.adjustment import adjust_bars
+from src.data.schema import PRICE_BASES
 
 
 def main():
@@ -19,13 +21,10 @@ def main():
     manifest, frames = read_dataset(args)
     basis = args.price_basis or manifest.get('price_basis', 'raw')
     bars = frames['bars']
-    if manifest['schema_version'] == 1:
-        if basis != 'legacy_provider_adjusted':
-            raise ValueError('Legacy adjusted data cannot be relabeled as raw or another basis')
-    elif basis != 'raw':
+    if basis != 'raw':
         bars = adjust_bars(bars, frames.get('adjustments'), method=basis,
-                           anchor_end=manifest['requested_end_inclusive'])
-    key = 'timestamp' if manifest['schema_version'] == 3 else 'date'
+                           anchor_end=bars.date.max() if 'date' in bars else None)
+    key = 'timestamp'
     dates = bars[key]
     print(json.dumps({'dataset_id': manifest['dataset_id'], 'provider': manifest['provider'],
         'market': manifest.get('market', [x['venue'] for x in manifest.get('instruments', [])]), 'symbols': manifest['symbols'], 'price_basis': basis,

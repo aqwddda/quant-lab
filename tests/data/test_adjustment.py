@@ -1,11 +1,13 @@
+from src.data.normalization import instruments_from_reference
 import pandas as pd
 import pytest
 import tushare
 from src.data.adjustment import adjust_bars
-from src.data.normalize import normalize_tushare, normalize_yahoo
+from src.data.normalization.tushare import normalize_tushare
+from src.data.normalization.yahoo import normalize_yahoo
 from src.data.providers.tushare import TushareProvider
 from src.data.providers.yahoo import YahooProvider
-from src.data.loader import load_bars
+from src.data.loader import load_dataset
 from tests.data.test_tushare_provider import FakeTushare
 from tests.data.test_yahoo_provider import FakeYahoo
 
@@ -32,6 +34,7 @@ def test_cash_dividend_ratio():
     bars = pd.DataFrame({'date': pd.to_datetime(['2020-01-02', '2020-01-03']).astype('datetime64[ns]'),
         'symbol': 'SPY', 'open': [100., 99.], 'high': [101., 100.], 'low': [99., 98.],
         'close': [100., 99.], 'volume': [1000, 1000]})
+    bars['timestamp']=bars.date.dt.tz_localize('UTC')
     factors = bars[['date', 'symbol']].copy()
     factors['adj_factor'] = [0.99, 1.]
     factors['provider'] = 'yahoo'
@@ -66,10 +69,11 @@ def test_against_actual_tushare_pro_bar_sdk_offline(monkeypatch, method):
 
 def test_qfq_anchor_uses_requested_end_not_future_dataset_end(monkeypatch, store):
     _, snapshot, frames = split_fixture(monkeypatch)
-    store.save_dataset(**frames, dataset_id='tushare_anchor', provider='tushare',
-        provider_version='fixture', market='CN', asset_type='EQUITY', start='2020-01-02', end='2020-01-03',
+    store.save_dataset(frames['bars'],dataset_id='tushare_anchor',provider='tushare',provider_version='fixture',
+        instruments=instruments_from_reference(frames['instruments']),timeframe='1d',source_timezone='Asia/Shanghai',
+        session_timezone='Asia/Shanghai',normalized_frames={k:v for k,v in frames.items() if k!='bars'},
         source_frames=snapshot.source_frames)
-    loaded = load_bars('CN', ['000001.SZ'], '2020-01-02', '2020-01-02', price_basis='qfq', store=store)
+    loaded=load_dataset('tushare_anchor',end='2020-01-02T23:59:59+08:00',price_basis='qfq',store=store)
     assert loaded.close.tolist() == [100.]
 
 

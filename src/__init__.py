@@ -1,1 +1,1 @@
-"""Transparent daily-bar research components."""
+"""Auditable market research infrastructure."""

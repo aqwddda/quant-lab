@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import pytest
-from quant_lab.market import Bar, Timeframe
-from quant_lab.chan import InclusionProcessor, ChanConfig, Direction, FractalType, FractalDetector
+from src.market import Bar, Timeframe
+from src.chan import InclusionProcessor, ChanConfig, Direction, FractalType, FractalDetector
 
 
 def bar(i,high,low):

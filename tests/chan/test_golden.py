@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import pytest
-from quant_lab.market import Bar, Timeframe
-from quant_lab.chan import ChanAnalyzer
+from src.market import Bar, Timeframe
+from src.chan import ChanAnalyzer
 
 
 @pytest.mark.parametrize('name',['alternating_strokes','sequential_inclusion'])

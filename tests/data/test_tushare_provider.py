@@ -1,7 +1,8 @@
+from src.data.normalization import instruments_from_reference
 import pandas as pd
 import pytest
 from src.data.providers.tushare import TushareProvider
-from src.data.normalize import normalize_tushare
+from src.data.normalization.tushare import normalize_tushare
 
 
 class FakeTushare:
@@ -54,9 +55,11 @@ def test_source_normalization_units_calendar_and_store(monkeypatch, store, symbo
     assert normalized['bars'].date.dt.strftime('%Y%m%d').tolist() == ['20200102', '20200103']
     assert normalized['bars'].volume.tolist() == [2050, 1025]
     assert normalized['bars'].amount.tolist() == [20500., 5125.]
-    manifest = store.save_dataset(**normalized, dataset_id=f'tushare_CN_{symbol}_v1', provider='tushare',
-        provider_version=snapshot.provider_version, market='CN', asset_type='EQUITY', start='2020-01-02',
-        end='2020-01-03', source_frames=snapshot.source_frames, assumptions=snapshot.assumptions)
+    manifest = store.save_dataset(normalized['bars'], dataset_id=f'tushare_{symbol}_snapshot',
+        provider='tushare',provider_version=snapshot.provider_version,source_timezone='Asia/Shanghai',
+        session_timezone='Asia/Shanghai',timeframe='1d',instruments=instruments_from_reference(normalized['instruments']),
+        normalized_frames={k:v for k,v in normalized.items() if k!='bars'},
+        source_frames=snapshot.source_frames,assumptions=snapshot.assumptions)
     assert store.verify(manifest)['bars'].symbol.eq(symbol).all()
 
 

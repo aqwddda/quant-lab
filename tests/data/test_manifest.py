@@ -11,7 +11,7 @@ def test_manifest_self_checksum(store, saved):
 
 
 @pytest.mark.parametrize('field,value', [('symbols', ['MSFT']), ('provider', 'other'),
-                                        ('actual_end', '2020-06-15'), ('rows', 119)])
+                                        ('actual_end', '2020-06-15T00:00:00+00:00'), ('rows', 119)])
 def test_identity_and_data_metadata(store, saved, field, value):
     manifest = deepcopy(saved)
     manifest[field] = value
@@ -34,6 +34,13 @@ def test_missing_file(store, saved):
 
 
 def test_wrong_date_range(saved):
-    saved['actual_start'] = '2019-12-31'
-    with pytest.raises(ValueError, match='date range'):
+    saved['actual_start'] = '2021-01-01T00:00:00+00:00'
+    with pytest.raises(ValueError, match='timestamp range'):
+        validate_manifest(saved)
+
+
+@pytest.mark.parametrize('version',[0,1,2,4])
+def test_reject_unsupported_schema(saved,version):
+    saved['schema_version']=version
+    with pytest.raises(ValueError,match='current schema version'):
         validate_manifest(saved)

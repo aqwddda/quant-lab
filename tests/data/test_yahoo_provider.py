@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 from src.data.providers.yahoo import YahooProvider, session_labels
-from src.data.normalize import normalize_yahoo
+from src.data.normalization.yahoo import normalize_yahoo
 
 
 class FakeYahoo:
@@ -58,3 +58,10 @@ def test_timezone_is_required():
 def test_unsupported_calendar_is_explicit():
     with pytest.raises(NotImplementedError):
         YahooProvider(client=FakeYahoo()).fetch_calendar('2020-01-01', '2020-01-10')
+
+
+@pytest.mark.parametrize('start,end',[('20200101','2020-01-02'),('2020-01-01','20200102')])
+def test_request_dates_require_iso_format(start,end):
+    from src.data.providers.base import check_request
+    with pytest.raises(ValueError,match='YYYY-MM-DD'):
+        check_request('AAPL',start,end)

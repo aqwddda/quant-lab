@@ -1,60 +1,47 @@
 import pandas as pd
 import pytest
-from src.data.loader import load_bars
+from src.data.loader import load_dataset
+from src.market import Instrument
 
 
-def test_single_symbol_range(store, saved, canonical):
-    loaded = load_bars('US', ['AAPL'], '2020-01-08', '2020-01-15', store=store)
-    pd.testing.assert_frame_equal(loaded, canonical.loc[canonical.date.between('2020-01-08', '2020-01-15')].reset_index(drop=True))
-    assert loaded.attrs['manifests'][0]['dataset_id'] == saved['dataset_id']
+def test_single_symbol_range(store,saved,canonical):
+    loaded=load_dataset(saved['dataset_id'],symbols=['AAPL'],start='2020-01-08T00:00Z',end='2020-01-15T00:00Z',store=store)
+    expected=canonical.loc[canonical.timestamp.between('2020-01-08T00:00Z','2020-01-15T00:00Z')].reset_index(drop=True)
+    pd.testing.assert_frame_equal(loaded,expected)
+    assert loaded.attrs['manifests'][0]['dataset_id']==saved['dataset_id']
 
 
-def test_multi_symbol_long_format(store, saved, canonical):
-    other = canonical.copy()
-    other['symbol'] = 'MSFT'
-    store.save_dataset(other, dataset_id='fixture_US_MSFT_v1', provider='fixture',
-                       provider_version='1', market='US', asset_type='EQUITY',
-                       start='2020-01-01', end=str(other.date.iloc[-1].date()),
-                       source_frames={'bars': other})
-    data = load_bars('US', ['MSFT', 'AAPL'], '2020-01-01', str(other.date.iloc[-1].date()), store=store)
-    assert len(data) == len(canonical) * 2
-    assert not data.duplicated(['date', 'symbol']).any()
-    assert data.symbol.iloc[:4].tolist() == ['AAPL', 'MSFT', 'AAPL', 'MSFT']
-    assert data[['date', 'symbol']].equals(data.sort_values(['date', 'symbol'])[['date', 'symbol']])
+def test_multi_symbol_long_format(store,canonical,dataset_options):
+    other=canonical.copy();other['symbol']='MSFT'
+    combined=pd.concat([canonical,other]).sort_values(['timestamp','symbol']).reset_index(drop=True)
+    options={**dataset_options,'instruments':[Instrument('AAPL','AAPL','equity','NASDAQ'),Instrument('MSFT','MSFT','equity','NASDAQ')]}
+    manifest=store.save_dataset(combined,dataset_id='multi_symbol',source_frames={'bars':combined},**options)
+    loaded=load_dataset(manifest['dataset_id'],store=store)
+    assert len(loaded)==len(canonical)*2
+    assert not loaded.duplicated(['timestamp','symbol']).any()
+    assert loaded.symbol.iloc[:4].tolist()==['AAPL','MSFT','AAPL','MSFT']
 
 
-def test_ambiguous_version_needs_explicit_selection(store, saved, canonical):
-    store.save_dataset(canonical, dataset_id='fixture_US_AAPL_v2', provider='fixture',
-                       provider_version='1', market='US', asset_type='EQUITY', start='2020-01-01',
-                       end=str(canonical.date.iloc[-1].date()), source_frames={'bars': canonical})
-    with pytest.raises(ValueError, match='Multiple frozen versions'):
-        load_bars('US', ['AAPL'], '2020-01-01', '2020-01-10', store=store)
-    assert len(load_bars('US', ['AAPL'], '2020-01-01', '2020-01-10', store=store,
-                         dataset_id=saved['dataset_id'])) == 8
+def test_version_selection_is_explicit(store,saved,canonical,dataset_options):
+    store.save_dataset(canonical,dataset_id='second_snapshot',source_frames={'bars':canonical},**dataset_options)
+    assert load_dataset(saved['dataset_id'],store=store).attrs['manifests'][0]['dataset_id']==saved['dataset_id']
+    with pytest.raises(TypeError): load_dataset(store=store)
 
 
-def test_checksum_checked_before_date_filter(store, saved, canonical):
-    path = store.resolve(saved['normalized_files']['bars']['path'])
-    canonical.loc[len(canonical) - 1, 'close'] += 0.5
-    canonical.to_parquet(path, index=False)
-    with pytest.raises(ValueError, match='checksum'):
-        load_bars('US', ['AAPL'], '2020-01-01', '2020-01-10', store=store)
+def test_checksum_checked_before_filter(store,saved,canonical):
+    path=store.resolve(saved['normalized_files']['bars']['path'])
+    canonical.loc[len(canonical)-1,'close']+=.5;canonical.to_parquet(path,index=False)
+    with pytest.raises(ValueError,match='checksum'):
+        load_dataset(saved['dataset_id'],start='2020-01-08T00:00Z',end='2020-01-15T00:00Z',store=store)
 
 
-@pytest.mark.parametrize('basis', ['adjusted', 'unknown'])
-def test_unknown_basis(store, basis):
-    with pytest.raises(ValueError, match='Unknown price basis'):
-        load_bars('US', ['AAPL'], '2020-01-01', '2020-01-10', price_basis=basis, store=store)
+@pytest.mark.parametrize('basis',['adjusted','unknown'])
+def test_unknown_price_basis(store,saved,basis):
+    with pytest.raises(ValueError,match='Unknown price basis'):
+        load_dataset(saved['dataset_id'],price_basis=basis,store=store)
 
 
-def test_explicit_per_symbol_versions(store, saved, canonical):
-    for symbol, version in [('AAPL', 'v2'), ('MSFT', 'v1'), ('MSFT', 'v2')]:
-        frame = canonical.copy()
-        frame['symbol'] = symbol
-        store.save_dataset(frame, dataset_id=f'{symbol}_{version}', provider='fixture', provider_version='1',
-                           market='US', asset_type='EQUITY', start='2020-01-01',
-                           end=str(frame.date.iloc[-1].date()), source_frames={'bars': frame})
-    data = load_bars('US', ['AAPL', 'MSFT'], '2020-01-01', '2020-01-10', store=store,
-                     dataset_id={'AAPL': saved['dataset_id'], 'MSFT': 'MSFT_v2'})
-    assert len(data) == 16
-    assert {m['dataset_id'] for m in data.attrs['manifests']} == {saved['dataset_id'], 'MSFT_v2'}
+def test_symbol_timeframe_and_range_validation(store,saved):
+    for options in [{'symbols':['MSFT']},{'timeframe':'15m'},{'start':'2020-01-01'},
+        {'start':'2020-01-10T00:00Z','end':'2020-01-01T00:00Z'}]:
+        with pytest.raises(ValueError): load_dataset(saved['dataset_id'],store=store,**options)

@@ -83,12 +83,12 @@ python scripts/inspect_chan.py --dataset-id <id> --symbol EURUSD \
 ```
 
 默认输出 `reports/chan_<id>/raw_bars.csv, merged_bars.csv, fractals.csv, strokes.csv, chan.json`，`--plot` 增加 chan.png。无订单或收益报告。
-V2 数据必须加 `--session-timezone America/New_York` 等明确 adapter 时区；初始包含报错时可以显式加 `--initial-direction-policy up/down` 作临时实验。
+初始包含报错时可以显式加 `--initial-direction-policy up/down` 作临时实验。
 start/end 先选择分析范围，因此是 cold start，没有隐含先前历史。要检查全历史状态，应从版本起点分析。
 
 ```python
-from quant_lab.chan import ChanAnalyzer
-from quant_lab.data.loader import load_dataset, iter_bars
+from src.chan import ChanAnalyzer
+from src.data.loader import load_dataset, iter_bars
 
 analyzer = ChanAnalyzer()
 for bar in iter_bars(load_dataset('explicit_id')):

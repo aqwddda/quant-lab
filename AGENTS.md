@@ -36,7 +36,7 @@ Before adding a dependency, explain why the standard library or existing depende
 
 Keep the following responsibilities separate.
 
-### strategy.py
+### src/strategies/
 
 Only calculate indicators and trading signals.
 
@@ -48,7 +48,7 @@ It must NOT:
 - calculate commissions
 - access future market data
 
-### execution.py
+### src/backtest/execution.py
 
 Responsible for:
 
@@ -58,7 +58,7 @@ Responsible for:
 - slippage
 - execution constraints
 
-### portfolio.py
+### src/backtest/portfolio.py
 
 Responsible for:
 
@@ -68,15 +68,15 @@ Responsible for:
 - realized/unrealized PnL
 - total equity
 
-### backtest.py
+### src/backtest/engine.py
 
 Responsible for driving the simulation chronologically.
 
-### metrics.py
+### src/backtest/metrics.py
 
 Responsible only for calculating performance metrics from completed backtest results.
 
-### validation.py
+### src/validation.py and src/data/validation.py
 
 Responsible for:
 
@@ -123,7 +123,9 @@ Data Provider → Source Snapshot → Normalization → Validation → Frozen St
 Supplier responses are frozen under data/source/; canonical bars, adjustments and
 corporate actions live under data/normalized/; instruments and calendars under
 data/reference/; checksummed manifests under data/manifests/.
-data/raw/ preserves the historical V1 adjusted SPY experiment without rewriting it.
+Current code only supports the formal UTC bar schema and schema_version=3 manifests.
+Do not add readers, aliases or special price channels for retired schemas.
+Existing frozen files must never be rewritten during source cleanup.
 
 Source Data means the supplier snapshot, not unadjusted historical prices.
 Raw Price means historical unadjusted OHLC. Adjustment semantics and units must be
@@ -155,10 +157,10 @@ Every important accounting operation must have deterministic tests.
 
 At minimum maintain:
 
-- test_strategy.py
-- test_execution.py
-- test_accounting.py
-- test_no_lookahead.py
+- tests/strategies/test_strategy.py
+- tests/backtest/test_execution.py
+- tests/backtest/test_accounting.py
+- tests/backtest/test_no_lookahead.py
 
 Before considering a task complete, run the relevant tests.
 
@@ -245,16 +247,21 @@ Keep generated data, reports, credentials and secrets out of Git.
 
 ## Current phase
 
-The current package lives under src/quant_lab/; historical src.* modules are
-compatibility exports. Data supports immutable V1/V2 compatibility and V3 UTC
-bars, local Forex snapshots, multi-symbol reads and explicitly anchored resampling.
-Chan-Core implements only inclusion, strict fractals and strokes, incrementally;
+The source lives directly under src/data/, src/market/, src/chan/,
+src/strategies/ and src/backtest/. Imports use src.*.
+Do not create another project-name package under src.
+src/ itself is the project source root. Each capability has one implementation
+and one import path; do not add old-entrypoint wrappers or module aliases.
+
+Data supports current UTC bars, local Forex snapshots, multi-symbol reads,
+provider snapshot normalization, immutable manifests and anchored resampling.
+Daily supplier session dates may remain auxiliary adjustment/calendar keys;
+canonical bars always include UTC timestamp and explicit timeframe semantics.
+Chan-Core implements inclusion, strict fractals and strokes incrementally;
 confirmed structures must never be rewritten. Undefined theory remains documented
 as provisional defaults or explicit errors.
 The Backtest Engine consumes Strategy/Execution protocols and remains single asset,
-long or cash Equity accounting. V3 intraday Equity research uses daily equity
-snapshots for risk metrics. The default SPY experiment uses legacy_provider_adjusted
-prices and must retain its recorded V1 regression results exactly.
+long or cash Equity accounting. Risk metrics use daily equity snapshots.
 CN backtests are data pipeline smoke tests and must disclose missing A-share
 execution rules. Corporate action events are stored but not applied to accounts.
 Chan-FX is structure observation only; Forex spread, lot, leverage, margin, swap,

@@ -1,10 +1,11 @@
+from src.data.normalization import instruments_from_reference
 import pandas as pd
 import pytest
 import tushare
 from src.data.adjustment import adjust_bars
 from src.data.providers.tushare import TushareProvider
-from src.data.normalize import normalize_tushare
-from src.data.loader import load_bars
+from src.data.normalization.tushare import normalize_tushare
+from src.data.loader import load_dataset
 from tests.data.test_tushare_provider import FakeTushare
 
 
@@ -18,10 +19,11 @@ def test_qfq_end_factor_on_session_without_bar(monkeypatch, store):
     snapshot = TushareProvider(client=api).fetch_snapshot('000001.SZ', '2020-01-02', '2020-01-06')
     frames = normalize_tushare(snapshot.prepared, '000001.SZ')
     assert len(frames['adjustments']) == 3 and len(frames['bars']) == 2
-    store.save_dataset(**frames, dataset_id='suspended_factor', provider='tushare', provider_version='fixture',
-                       market='CN', asset_type='EQUITY', start='2020-01-02', end='2020-01-06',
-                       source_frames=snapshot.source_frames)
-    loaded = load_bars('CN', ['000001.SZ'], '2020-01-02', '2020-01-06', price_basis='qfq', store=store)
+    store.save_dataset(frames['bars'],dataset_id='suspended_factor',provider='tushare',provider_version='fixture',
+        instruments=instruments_from_reference(frames['instruments']),timeframe='1d',source_timezone='Asia/Shanghai',
+        session_timezone='Asia/Shanghai',normalized_frames={k:v for k,v in frames.items() if k!='bars'},
+        source_frames=snapshot.source_frames)
+    loaded=load_dataset('suspended_factor',end='2020-01-06T23:59:59+08:00',price_basis='qfq',store=store)
     assert loaded.close.tolist() == [25., 25.]
     expected = tushare.pro_bar(ts_code='000001.SZ', api=api, start_date='20200102', end_date='20200106',
                               adj='qfq', retry_count=1)

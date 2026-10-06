@@ -7,7 +7,7 @@ import pytest
 from scripts.download_data import download_dataset
 from src.data.providers.yahoo import YahooProvider
 from src.data.providers.tushare import TushareProvider
-from src.data.loader import load_bars
+from src.data.loader import load_dataset
 from tests.data.test_yahoo_provider import FakeYahoo
 from tests.data.test_tushare_provider import FakeTushare
 
@@ -24,15 +24,15 @@ def test_four_symbol_download_freeze_verify_load(monkeypatch, store, provider, m
     else:
         transport = TushareProvider(client=FakeTushare(symbol))
         start, end, basis = '2020-01-02', '2020-01-03', 'qfq'
-    manifest = download_dataset(provider, market, symbol, start, end, store=store,
+    manifest = download_dataset(provider, symbol, start, end, store=store,
                                  dataset_id=f'{provider}_{symbol}_pipeline', provider_instance=transport)
     store.verify(store.load_manifest(manifest['dataset_id']))
-    data = load_bars(market, [symbol], start, end, price_basis=basis, store=store)
+    data = load_dataset(manifest['dataset_id'],symbols=[symbol],price_basis=basis,store=store)
     assert len(data) == 2 and data.symbol.eq(symbol).all()
     source = pd.read_parquet(store.resolve(manifest['source_files']['bars']['path']))
     pd.testing.assert_frame_equal(source, transport.source_frames['bars'])
     with pytest.raises(FileExistsError):
-        download_dataset(provider, market, symbol, start, end, store=store,
+        download_dataset(provider, symbol, start, end, store=store,
                            dataset_id=manifest['dataset_id'], provider_instance=transport)
     for tool in ['verify_dataset.py', 'inspect_data.py']:
         process = subprocess.run([sys.executable, str(ROOT / 'scripts' / tool), '--root', str(store.root),
@@ -49,7 +49,7 @@ def test_failed_normalization_keeps_source_without_publishing(store):
                 frame['Volume'] = 1000.5
             return snapshot
     with pytest.raises(ValueError, match='integer-valued'):
-        download_dataset('yahoo', 'US', 'AAPL', '2020-08-28', '2020-08-31', store=store,
+        download_dataset('yahoo', 'AAPL', '2020-08-28', '2020-08-31', store=store,
                          dataset_id='failed_source', provider_instance=InvalidProvider(client=FakeYahoo()))
     assert store.resolve('data/source/yahoo/failed_source/bars.parquet').is_file()
     assert not store.manifest_path('failed_source').exists()
@@ -67,17 +67,18 @@ def test_verify_cli_returns_failure_on_corruption(store, saved):
 @pytest.mark.parametrize('market,symbol', [('US', 'AAPL'), ('CN', '000001.SZ')])
 def test_generic_report_and_backtest_never_import_provider_sdks(store, saved, canonical, tmp_path, market, symbol):
     import yaml
+    from src.market import Instrument
     if market == 'CN':
-        canonical['symbol'] = symbol
-        saved = store.save_dataset(canonical, dataset_id='fixture_CN', provider='fixture', provider_version='1',
-            market=market, asset_type='EQUITY', start='2020-01-01', end=str(canonical.date.iloc[-1].date()),
-            source_frames={'bars': canonical})
+        canonical['symbol']=symbol
+        saved=store.save_dataset(canonical,dataset_id='fixture_CN',provider='fixture',provider_version='1',
+            instruments=[Instrument(symbol,symbol,'equity','SZSE',quote_currency='CNY')],timeframe='1d',
+            source_timezone='UTC',source_frames={'bars':canonical})
     strategy = tmp_path / 'strategy.yaml'
-    strategy.write_text(yaml.safe_dump({'symbol': symbol, 'market': market, 'price_basis': 'raw',
-                                        'fast_window': 20, 'slow_window': 60}))
-    config = yaml.safe_load((ROOT / 'config/backtest.yaml').read_text())
-    config.update({'start_date': saved['requested_start'], 'end_date': saved['requested_end_inclusive'],
-                   'reports_dir': str(tmp_path / 'reports')})
+    strategy.write_text(yaml.safe_dump({'strategy':{'name':'sma_cross','params':{'fast_window':20,'slow_window':60}},
+        'data':{'symbol':symbol,'asset_class':'equity','timeframe':'1d','price_basis':'raw','market':market}}))
+    config=yaml.safe_load((ROOT/'config/backtest.yaml').read_text())
+    config.update({'start_date':canonical.timestamp.iloc[0].isoformat(),'end_date':canonical.timestamp.iloc[-1].isoformat(),
+        'reports_dir':str(tmp_path/'reports')})
     backtest = tmp_path / 'backtest.yaml'
     backtest.write_text(yaml.safe_dump(config))
     code = """
@@ -93,13 +94,13 @@ sys.argv = sys.argv[1:]
 runpy.run_path(script, run_name='__main__')
 """
     process = subprocess.run([sys.executable, '-c', code, str(ROOT / 'scripts/run_backtest.py'),
-        '--strategy-config', str(strategy), '--backtest-config', str(backtest), '--data-root', str(store.root)],
+        '--strategy-config', str(strategy), '--backtest-config', str(backtest), '--data-root', str(store.root),'--dataset-id',saved['dataset_id']],
         capture_output=True, text=True)
     assert process.returncode == 0, process.stderr
     report = json.loads((tmp_path / 'reports/metrics.json').read_text())
     assert report['audit']['price_basis'] == 'raw'
     assert report['audit']['dataset_id'] == saved['dataset_id']
-    assert report['audit']['strategy_config']['symbol'] == symbol
+    assert report['audit']['strategy_config']['data']['symbol'] == symbol
     if market == 'CN':
         assert 'This backtest does not yet model all China A-share market-specific execution rules.' in report['audit']['assumptions']
     for name in ['trades.csv', 'equity.csv', 'metrics.json', 'equity_curve.png', 'drawdown.png']:
